@@ -248,3 +248,140 @@ Set under SSL/TLS → Overview. Controls the Cloudflare → origin leg only.
   from Bucharest, Falkenstein from Sofia. BGP follows peering, not geography.
 - **Free-tier cold starts (~30-60s)** land inside measurements and look like
   network latency. Run `keepalive.sh` before any experiment.
+
+---
+
+# Lab log — what we did and what it showed
+
+Chronological record with real numbers. Raw JSON for every global run is in
+`results/`.
+
+## Setup decisions
+
+| Decision | Chosen | Why |
+|---|---|---|
+| Origin host | Render free tier, **Oregon** | Fly.io now requires a card. Oregon is ~13,000km from India, so the propagation gap is impossible to miss. |
+| Domain | `drkreddy.com` via Cloudflare free | Already owned. Free plan forces full nameserver delegation. |
+| Lab hostname | `cdn-lab.drkreddy.com` | A name that served nothing before, so blast radius on the live domain is zero. |
+| Proxy posture | everything grey except `cdn-lab` | The live site and email keep behaving exactly as before. |
+
+## 2026-08-05 — DNS migration to Cloudflare
+
+Moved nameservers `ns1/ns2.dns-parking.com` (Hostinger) → `olivia/woz.ns.cloudflare.com`.
+
+**14 records migrated, 14/14 verified afterwards** via `./tools/verify-dns.sh`.
+Apex and `www` still 301 to `drkreddy.github.io`; `server: hcdn` with no
+`cf-ray` confirms grey cloud is genuinely not proxying.
+
+What the three sources each missed:
+
+| Source | Records found | Missed |
+|---|---|---|
+| `dig` from outside | 7 | 3 DKIM CNAMEs, autoconfig, autodiscover, `A ai` |
+| Cloudflare auto-scan | 13 | `AAAA ai` |
+| Hostinger zone editor | **14** | nothing — authoritative |
+
+The lesson: zones cannot be enumerated externally, so never trust a scan as
+complete. Diff against the registrar's own editor before switching.
+
+## Module 1 — baseline, before our CDN
+
+`/api/time` (sends `no-store`), 10 global probes.
+
+| Run | Hostname | Total median | DNS median | TTFB median |
+|---|---|---|---|---|
+| `baseline-01-no-cloudflare` | `cdn-lab-origin.onrender.com` | **226ms** | 18ms | 189ms |
+| `baseline-02-grey-cloud` | `cdn-lab.drkreddy.com` (grey) | 341ms | 96ms | 212ms |
+| `baseline-02b-grey-warm-dns` | same, DNS caches warmed | 382ms | 68ms | 194ms |
+
+**TTFB was ~85% of every total.** The entire cost is the round trip to Oregon.
+
+The grey-cloud runs measured *worse* than the raw Render hostname. Two causes,
+both real:
+
+1. **Cold DNS caches** on a minutes-old hostname — London 900→213ms on rerun.
+2. **One extra CNAME hop.** Cold full recursion: `cdn-lab-origin.onrender.com`
+   ~256ms over 2 hops vs `cdn-lab.drkreddy.com` ~346ms over 3. **~90ms for one
+   hop**, spent before the first request packet is sent.
+
+A confound worth knowing: **Render is itself behind Cloudflare.** `*.onrender.com`
+returns `server: cloudflare`, so this "no CDN" baseline was really *proxy without
+caching*. That turned out to help — it isolates the caching benefit from the
+TLS-termination benefit.
+
+## Module 2 — turning the proxy on
+
+Set SSL/TLS to **Full (strict)**, flipped `cdn-lab` to orange.
+
+**DNS chain collapsed**, exactly as predicted:
+
+    grey:    cdn-lab -> onrender.com -> gcp-us-west1-1... -> ...cdn.cloudflare.net -> 216.24.57.7
+    orange:  cdn-lab -> 172.67.145.72, 104.21.55.58        (Cloudflare anycast, one lookup)
+
+No Error 1014 — Cloudflare proxying Cloudflare works, given a Render Custom
+Domain and Full (strict).
+
+### The core experiment: two endpoints, same test
+
+4 requests each, from India, after `/stats/reset`:
+
+| | `/api/time` (`no-store`) | `/static/app.v1.js` (`immutable`) |
+|---|---|---|
+| Requests sent | 4 | 4 |
+| **Reached Oregon** | **4** | **1** |
+| cf-cache-status | `DYNAMIC` ×4 | `MISS`, then `HIT` ×3 |
+| TTFB | 606, 302, 354, 344ms | 483ms → **76, 64, 65ms** |
+
+**Turning on a CDN cached nothing by default.** Cloudflare's default rules only
+cover static file extensions, so the JSON API stayed `DYNAMIC` — permanently,
+until a Cache Rule says otherwise. The static asset cached with no configuration
+at all and TTFB fell 7×.
+
+### Cache is per-colo
+
+`/static/app.v1.js`, 10 global probes, run twice:
+
+| Run | Result | Total median | TTFB median | New origin hits |
+|---|---|---|---|---|
+| `after-01-orange-cold-colos` | 1 HIT (SIN), **9 MISS** | 429ms | 294ms | **9** |
+| `after-02-orange-warm-colos` | **10 HIT** | 99ms | **12ms** | **0** |
+
+Run 1 was mostly MISS *despite* the cache being warm — warming it from India only
+populated Singapore. **Nine cities each fetched from Oregon independently.**
+Cloudflare's free-tier cache is per-PoP: 300+ locations means up to 300+ misses
+for one object.
+
+Run 2: every colo HIT, **TTFB 294ms → 12ms**, and the origin counter did not move
+at all. Ten worldwide requests, zero reached Oregon.
+
+This directly previews Module 6 — one purge means every PoP misses at once, and
+that is the thundering herd.
+
+### Honest caveat on before/after
+
+Modules 1 and 2 measured **different endpoints** (`/api/time` uncacheable vs
+`/static/*` cacheable), so "226ms → 99ms" changes two variables and is not a
+clean comparison. The valid one is `after-01` vs `after-02`: same URL, same
+config, only cache state differs — **429ms → 99ms, TTFB 294ms → 12ms**.
+
+Other measurement facts established:
+
+- **TTFB = network round trip + server think time.** Proven with
+  `/api/slow?ms=N`: sleeps of 0/1000/3000ms produced TTFB phases of
+  0.69/1.38/3.31s. The sleep lands in TTFB one-for-one.
+- **Cold starts are brutal.** A Render free instance took **22s** to wake. Warm
+  the origin before any measurement.
+- **Free-plan zones get a smaller colo footprint.** India → `BLR` through
+  Render's paid zone, but → `SIN` through our free zone.
+- **After caching, DNS becomes the bottleneck.** In run 2, TTFB was 9-38ms while
+  DNS was 132ms (Mumbai), 304ms (Cape Town). Fix one bottleneck, meet the next.
+
+## Status
+
+- [x] Module 0 — instrumented origin + measurement toolkit
+- [x] Module 1 — baseline latency, no CDN
+- [x] Module 2 — Cloudflare in front, proxy mechanics
+- [ ] Module 3 — caching strategies: make `/api/*` cacheable
+- [ ] Module 4 — path-based routing
+- [ ] Module 5 — invalidation
+- [ ] Module 6 — thundering herd
