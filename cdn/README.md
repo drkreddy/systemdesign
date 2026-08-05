@@ -82,3 +82,17 @@ Two things the smoke test against a Cloudflare-fronted site already showed:
   relationships, not distance.
 - One probe reported 2034ms of DNS while its neighbours reported 5ms. Single
   samples lie; read the median.
+
+## Measurement caveats learned the hard way
+
+- **globe.sh pins countries, not machines.** Globalping picks a different probe
+  in the same country on each run — one run drew Johannesburg, the next
+  Pretoria. Small run-to-run differences are hardware and network variance, not
+  signal. Compare medians across several runs, never two single runs.
+- **A brand-new hostname has no DNS cache anywhere.** Its first measurement pays
+  full recursion at every probe and will look far worse than it is. Warm it
+  before taking a baseline.
+- **CNAME chain depth is real latency.** cdn-lab.drkreddy.com resolves through
+  three CNAMEs (~346ms cold recursion) against two for the raw Render hostname
+  (~256ms). Proxying collapses the chain to a single A record, because
+  Cloudflare answers with its own anycast IPs instead of a pointer.
