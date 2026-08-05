@@ -63,12 +63,13 @@ if [ "$MODE" = http ]; then
     [ (.probe.city + ", " + .probe.country),
       (.result.timings.dns // 0), (.result.timings.tcp // 0), (.result.timings.tls // 0),
       (.result.timings.firstByte // 0), (.result.timings.total // 0),
-      ( $h | capture("(?i)cf-cache-status: *(?<v>[A-Za-z]+)").v? // "-" ),
+      ( $h | capture("(?i)x-edge-cache: *(?<v>[A-Za-z-]+)").v?
+             // ( $h | capture("(?i)cf-cache-status: *(?<v>[A-Za-z]+)").v? ) // "-" ),
       ( $h | capture("(?i)cf-ray: *[a-f0-9]+-(?<v>[A-Z]{3})").v? // "-" )
     ] | @tsv' \
   | sort -t$'\t' -k6 -n \
   | awk -F'\t' '{
-      hot = ($7=="HIT") ? "\033[32m" : ($7=="MISS"||$7=="EXPIRED") ? "\033[33m" : "\033[0m";
+      hot = ($7=="HIT") ? "\033[32m" : ($7=="STALE") ? "\033[36m" : ($7=="MISS"||$7=="EXPIRED") ? "\033[33m" : "\033[0m";
       printf "%-22s %7dm %7dm %7dm %s%8dm %8dm\033[0m  %s%-11s\033[0m %-6s\n",
         substr($1,1,22), $2, $3, $4, hot, $5, $6, hot, $7, $8 }'
 

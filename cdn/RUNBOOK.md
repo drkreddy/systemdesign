@@ -717,6 +717,104 @@ work on its own but is harmless, and documents the attempt.
 
 ---
 
+## Module 5 — invalidation
+
+Three ways to stop serving stale content, with very different costs:
+
+| Strategy | Time to take effect | Origin cost | Complexity |
+|---|---|---|---|
+| TTL expiry | up to the TTL | one refetch per PoP | zero |
+| Active purge | seconds, global | **stampede** — every PoP misses at once | API + tracking |
+| Versioned URLs | instant | zero — a new URL is just a new object | needs a build step |
+
+### Versioned URLs — invalidation by never needing it
+
+`/static/*` is `max-age=31536000, immutable`. Requesting v1, v1, v2, v2, v3 gave
+`HIT HIT MISS HIT MISS` — **2 origin hits for 2 new versions**, then never again.
+
+This is why bundlers emit `app.a3f9b2c.js`: the content hash *is* the cache key.
+Ship new code, reference a new URL, and the old object ages out unused. No purge,
+no propagation delay, no stampede. For static assets this strictly dominates.
+
+Limit: it only works for content referenced *indirectly*, via HTML that itself
+has a short TTL. `/api/products` cannot be versioned — users request it directly.
+
+### Purge-by-URL does not work with custom cache keys
+
+Measured on a **1-year TTL** object, so nothing but a purge could evict it:
+
+    purge by URL      -> still HIT   did NOT evict
+    purge everything  -> MISS        did evict
+
+The Worker builds a synthetic cache key (tracking params stripped, rest sorted).
+Cloudflare's purge-by-URL targets the standard key derived from the original
+request, so even an identical-looking URL does not reach the entry.
+
+**The tradeoff nobody mentions when you write the Worker:**
+
+| | Granular purge | Cache-key control |
+|---|---|---|
+| Default Cloudflare caching | works | query strings fragment |
+| Worker with custom keys | **only purge_everything** | normalisation, SWR |
+
+`purge_everything` drops every object in every PoP at once — a deliberate
+zone-wide stampede, and the wrong tool for invalidating one object.
+
+### Generational invalidation (Worker + KV)
+
+Invalidate by bumping a counter instead of deleting anything. The generation is
+part of the cache key, so a bump makes every entry for that tag unreachable at
+once; orphans are never read again and fall out on their own TTL.
+
+    KV: gen:<tag> -> integer
+    cache key: <normalised url>&__g=<gen>
+    POST /__purge?tag=assets   (authenticated) -> gen+1
+
+Routes carry tags: `assets`, `api`, `page`.
+
+**The purge endpoint is authenticated.** An open one is a denial-of-service
+vector — anyone could orphan the cache in a loop and drive all traffic to origin.
+Secret set via `wrangler secret put PURGE_TOKEN`, checked against
+`X-Purge-Token`. Verified: no token and wrong token both return 401.
+
+**KV is read once per isolate per 5s, not per request.** A KV read on the hot
+path would add latency and partly defeat caching. Cost: a warm isolate can take
+up to 5s to notice a purge, on top of KV's own propagation.
+
+### Measured: purge propagation and its cost
+
+Primed all 10 cities, confirmed warm, bumped the generation, measured repeatedly.
+
+| Run | Result | Median total |
+|---|---|---|
+| `m5-warm` (before purge) | mostly HIT | **132ms** |
+| `m5-purge-t0` (immediately after) | 5 HIT, 3 MISS — not yet propagated | 164ms |
+| `m5-purge-t60` (t+60s) | 7 MISS, 1 HIT — propagated | **549ms** |
+
+**Propagation takes roughly 30-60s** globally, dominated by KV eventual
+consistency plus the 5s isolate memo. Not instant, and worth knowing before
+relying on purge for anything correctness-critical.
+
+**One purge of one object made the site 4x slower worldwide.** Every PoP lost its
+copy at the same moment and re-fetched from Oregon independently. That is the
+thundering herd, and Module 6 makes it far worse on purpose before fixing it.
+
+### Commands
+
+    ./tools/purge.sh url <url>    # granular — does NOT work with Worker cache keys
+    ./tools/purge.sh all          # works, but stampedes the whole zone
+
+    # generational purge (the one that actually works here)
+    curl -H "X-Purge-Token: $PURGE_TOKEN" \
+      "https://cdn-lab.drkreddy.com/__purge?tag=assets"
+
+    # watch propagation
+    ./tools/globe.sh http <url> before
+    # ...purge...
+    ./tools/globe.sh http <url> after
+
+---
+
 <!-- KEEP THIS LAST. New module notes go ABOVE this marker. -->
 
 ## Status
@@ -726,5 +824,5 @@ work on its own but is harmless, and documents the attempt.
 - [x] Module 2 — Cloudflare in front, proxy mechanics
 - [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
 - [x] Module 4 — path-based routing in a Worker (deployed; SWR + key normalisation verified)
-- [ ] Module 5 — invalidation
+- [x] Module 5 — invalidation: versioned URLs, purge limits, generational keys
 - [ ] Module 6 — thundering herd

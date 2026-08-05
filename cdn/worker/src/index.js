@@ -42,6 +42,7 @@ const ROUTES = [
   },
   {
     name: 'immutable-assets',
+    tag: 'assets',
     test: (p) => p.startsWith('/static/'),
     // Fingerprinted filenames: the URL changes when the content does, so the
     // object never needs invalidating and can be cached effectively forever.
@@ -52,6 +53,7 @@ const ROUTES = [
   },
   {
     name: 'api-dynamic',
+    tag: 'api',
     test: (p) => p.startsWith('/api/'),
     // Short edge TTL with browser revalidation: users see fresh data while the
     // origin sees at most one request per edgeTtl per PoP.
@@ -62,6 +64,7 @@ const ROUTES = [
   },
   {
     name: 'default',
+    tag: 'page',
     test: () => true,
     cache: true,
     edgeTtl: 60,
@@ -71,6 +74,32 @@ const ROUTES = [
 ];
 
 const pickRoute = (pathname) => ROUTES.find((r) => r.test(pathname));
+
+// Cache generations. Invalidation works by bumping a counter rather than by
+// deleting anything: the generation is part of the cache key, so a bump makes
+// every existing entry for that tag unreachable at once. Orphaned entries are
+// never read again and fall out on their own TTL.
+//
+// This exists because Cloudflare's purge-by-URL cannot reach entries stored
+// under a Worker's custom cache key — measured in Module 5 — leaving
+// purge_everything as the only API option, which is a zone-wide stampede.
+//
+// KV is read once per isolate per GEN_MEMO_MS rather than per request. A KV read
+// on every request would add latency to the hot path and defeat the point of
+// caching. The cost is that a purge takes up to GEN_MEMO_MS to be noticed by an
+// already-warm isolate, on top of KV's own global propagation delay.
+const GEN_MEMO_MS = 5000;
+const genMemo = new Map();
+
+async function generation(env, tag) {
+  if (!tag) return '0';
+  const now = Date.now();
+  const memo = genMemo.get(tag);
+  if (memo && now - memo.at < GEN_MEMO_MS) return memo.gen;
+  const gen = (await env.CACHE_META.get(`gen:${tag}`)) || '0';
+  genMemo.set(tag, { gen, at: now });
+  return gen;
+}
 
 // Every origin request goes through here, so no code path can accidentally
 // re-enter Cloudflare's zone cache by requesting our own proxied hostname.
@@ -83,12 +112,14 @@ function toOrigin(request) {
 // The cache key is a synthetic GET Request. Building it explicitly — rather than
 // letting Cloudflare derive one from the incoming request — is what makes
 // normalisation possible.
-function cacheKeyFor(request, url) {
+function cacheKeyFor(request, url, gen) {
   const key = new URL(url.toString());
   const kept = [...key.searchParams.entries()]
     .filter(([k]) => !TRACKING_PARAMS.some((re) => re.test(k)))
     .sort(([a], [b]) => a.localeCompare(b));   // ?b=2&a=1 must equal ?a=1&b=2
   key.search = new URLSearchParams(kept).toString();
+  // Namespaced by generation, so bumping it orphans every prior entry.
+  key.searchParams.set('__g', gen);
   return new Request(key.toString(), { method: 'GET' });
 }
 
@@ -109,7 +140,7 @@ const age = (res) => {
 };
 
 // Fetch from origin and store. Returns the response to serve.
-async function fetchAndStore(request, cacheKey, route, cache, ctx) {
+async function fetchAndStore(request, cacheKey, route, cache, ctx, gen) {
   // Fetch the origin by its OWN hostname rather than re-requesting our proxied
   // one. This is load-bearing, not a tidy-up.
   //
@@ -133,6 +164,7 @@ async function fetchAndStore(request, cacheKey, route, cache, ctx) {
 
   const res = new Response(originRes.body, originRes);
   res.headers.set('X-Edge-Route', route.name);
+  res.headers.set('X-Edge-Gen', gen ?? '0');
   res.headers.set('Cache-Control', buildCacheControl(route));
 
   if (!storable) {
@@ -162,6 +194,34 @@ async function fetchAndStore(request, cacheKey, route, cache, ctx) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // Tag invalidation endpoint. Authenticated, because an open purge endpoint
+    // is a denial-of-service vector: anyone could orphan the cache in a loop and
+    // drive every request to the origin.
+    if (url.pathname === '/__purge') {
+      const provided = request.headers.get('X-Purge-Token') || url.searchParams.get('token');
+      if (!env.PURGE_TOKEN || provided !== env.PURGE_TOKEN) {
+        return new Response(JSON.stringify({ error: 'unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        });
+      }
+      const tag = url.searchParams.get('tag');
+      if (!tag) {
+        return new Response(JSON.stringify({ error: 'tag required' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        });
+      }
+      const current = Number((await env.CACHE_META.get(`gen:${tag}`)) || '0');
+      const next = current + 1;
+      await env.CACHE_META.put(`gen:${tag}`, String(next));
+      genMemo.delete(tag);   // only clears THIS isolate; others wait out GEN_MEMO_MS
+      return new Response(JSON.stringify({
+        purged: tag, generation: next, at: new Date().toISOString(),
+      }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+    }
+
     const route = pickRoute(url.pathname);
 
     // Anything not idempotent must reach the origin untouched.
@@ -182,13 +242,15 @@ export default {
     }
 
     const cache = caches.default;
-    const cacheKey = cacheKeyFor(request, url);
+    const gen = await generation(env, route.tag);
+    const cacheKey = cacheKeyFor(request, url, gen);
     const hit = await cache.match(cacheKey);
 
     if (hit) {
       const a = age(hit);
       const res = new Response(hit.body, hit);
       res.headers.set('X-Edge-Route', route.name);
+      res.headers.set('X-Edge-Gen', gen);
       res.headers.set('X-Edge-Age', String(a));
       res.headers.set('Cache-Control', buildCacheControl(route));
 
@@ -203,12 +265,12 @@ export default {
       // reason a request arriving at expiry does not have to wait for Oregon.
       if (route.swr && a <= route.edgeTtl + route.swr) {
         res.headers.set('X-Edge-Cache', 'STALE');
-        ctx.waitUntil(fetchAndStore(request, cacheKey, route, cache, ctx));
+        ctx.waitUntil(fetchAndStore(request, cacheKey, route, cache, ctx, gen));
         return res;
       }
       // Too stale to serve — fall through and fetch synchronously.
     }
 
-    return fetchAndStore(request, cacheKey, route, cache, ctx);
+    return fetchAndStore(request, cacheKey, route, cache, ctx, gen);
   },
 };

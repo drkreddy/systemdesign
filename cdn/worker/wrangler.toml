@@ -7,3 +7,11 @@ compatibility_date = "2026-08-01"
 [[routes]]
 pattern = "cdn-lab.drkreddy.com/*"
 zone_name = "drkreddy.com"
+
+# Holds cache generation counters for tag-based invalidation. Cloudflare's
+# purge-by-URL cannot reach entries stored under a Worker's custom cache key,
+# and purge_everything is a zone-wide stampede — so invalidation is implemented
+# here instead.
+[[kv_namespaces]]
+binding = "CACHE_META"
+id = "e68d5bfcc8894fe6bfb537d72e3e0190"
