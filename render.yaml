@@ -1,3 +1,7 @@
+# Lives at the repository root because that is the only place Render looks for a
+# Blueprint — it cannot be nested under cdn/ even though that is where the
+# project it describes actually lives.
+#
 # Origin is placed in Oregon on purpose. Measuring from India, that is roughly
 # 13,000 km each way — ~220ms of round-trip propagation delay that no amount of
 # server tuning can remove. Erasing that gap is what Module 2 demonstrates.
@@ -7,7 +11,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    rootDir: origin
+    rootDir: cdn/origin
     buildCommand: npm install
     startCommand: node server.js
     # Render's own health checks also double as a partial keepalive, though on
