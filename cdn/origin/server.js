@@ -207,9 +207,12 @@ async function route(req, res, { path, q }) {
     });
   }
 
-  // Vary splits the cache into one entry per distinct header value. Fetch this
-  // with different Accept-Language values and watch the origin hit count climb
-  // even though the URL never changed.
+  // Per the HTTP spec, Vary splits the cache into one entry per distinct header
+  // value. Cloudflare does NOT implement that — it honours Vary: Accept-Encoding
+  // and ignores everything else, caching a single copy and serving it to all.
+  // Measured here: fr-FR, ja-JP and de-DE all received the en-US body on a HIT.
+  // The response echoes back the language the origin actually saw, so the body
+  // exposes the mix-up that cf-cache-status alone would hide.
   if (path === '/vary') {
     const n = record(path);
     const lang = req.headers['accept-language'] || 'none';

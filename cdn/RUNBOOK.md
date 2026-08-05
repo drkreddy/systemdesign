@@ -381,7 +381,7 @@ Other measurement facts established:
 - [x] Module 0 — instrumented origin + measurement toolkit
 - [x] Module 1 — baseline latency, no CDN
 - [x] Module 2 — Cloudflare in front, proxy mechanics
-- [~] Module 3 — caching strategies: make `/api/*` cacheable (in progress)
+- [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
 - [ ] Module 4 — path-based routing
 - [ ] Module 5 — invalidation
 - [ ] Module 6 — thundering herd
@@ -498,3 +498,48 @@ origin. We will build this by hand in a Worker.
     curl -sSI "$U/cache?maxage=0&smaxage=10&swr=120"   # prime
     sleep 13
     curl -sSI "$U/cache?maxage=0&smaxage=10&swr=120"   # EXPIRED = no SWR
+
+### Vary is ignored — and that breaks correctness, not hit rate
+
+Origin sent `Vary: Accept-Language` with `public, max-age=300`. One fresh URL,
+four languages:
+
+    requested en-US   MISS   body lang=en-US   correct
+    requested fr-FR   HIT    body lang=en-US   *** WRONG ***
+    requested ja-JP   HIT    body lang=en-US   *** WRONG ***
+    requested de-DE   HIT    body lang=en-US   *** WRONG ***
+    -> 1 origin hit
+
+**Cloudflare honours `Vary: Accept-Encoding` and ignores every other `Vary`
+value.** It caches one copy and serves it to everyone.
+
+Note the failure mode is the *opposite* of the spec-compliant one. A correct
+shared cache fragments per header value and the hit rate collapses. Cloudflare
+keeps a great hit rate and silently serves wrong content.
+
+**This is a security issue, not a performance one.** An app shipping
+
+    Cache-Control: public, max-age=60
+    Vary: Cookie
+
+behind Cloudflare will serve the first user's personalised response to every
+later user. That is one customer seeing another customer's data.
+
+`cf-cache-status` cannot detect this — every wrong response was a healthy-looking
+`HIT`. Only comparing the **body** against what was requested exposes it. When
+testing a cache, assert on content, not on cache status.
+
+**Never rely on `Vary` for correctness at a CDN.** Instead:
+
+- put the variant in the URL — `/api/data?lang=fr`, `/fr/page` — so it is part
+  of the cache key and cannot be confused
+- put it in the cache key explicitly, via Worker logic or custom cache key config
+- mark genuinely per-user content `private, no-store` and keep it away from
+  shared caches entirely
+
+### Command
+
+    # assert on the BODY, not on cf-cache-status
+    for lang in en-US fr-FR ja-JP; do
+      curl -sS -H "Accept-Language: $lang" "$U/vary?maxage=300&t=$(date +%s)" | jq -r .lang
+    done
