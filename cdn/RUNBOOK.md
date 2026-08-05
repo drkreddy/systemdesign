@@ -638,16 +638,6 @@ while the refresh happened behind them.
 
 ---
 
-## Status
-
-- [x] Module 0 — instrumented origin + measurement toolkit
-- [x] Module 1 — baseline latency, no CDN
-- [x] Module 2 — Cloudflare in front, proxy mechanics
-- [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
-- [x] Module 4 — path-based routing in a Worker (deployed; SWR + key normalisation verified)
-- [ ] Module 5 — invalidation
-- [ ] Module 6 — thundering herd
-
 ### Module 4 results
 
 Deployed with `wrangler deploy`. Route matching verified:
@@ -724,3 +714,17 @@ against the layer beneath you.
 
 `cf: { cacheTtl: 0 }` was left in place alongside the hostname fix. It does not
 work on its own but is harmless, and documents the attempt.
+
+---
+
+<!-- KEEP THIS LAST. New module notes go ABOVE this marker. -->
+
+## Status
+
+- [x] Module 0 — instrumented origin + measurement toolkit
+- [x] Module 1 — baseline latency, no CDN
+- [x] Module 2 — Cloudflare in front, proxy mechanics
+- [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
+- [x] Module 4 — path-based routing in a Worker (deployed; SWR + key normalisation verified)
+- [ ] Module 5 — invalidation
+- [ ] Module 6 — thundering herd
