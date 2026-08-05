@@ -543,3 +543,37 @@ testing a cache, assert on content, not on cache status.
     for lang in en-US fr-FR ja-JP; do
       curl -sS -H "Accept-Language: $lang" "$U/vary?maxage=300&t=$(date +%s)" | jq -r .lang
     done
+
+### Cache key settings — what the free plan actually gives you
+
+Cache Rules → your rule → **Cache key**.
+
+| Setting | Free plan | Verdict for this lab |
+|---|---|---|
+| Cache deception armor | available | **ON** — security, see below |
+| Cache by device type | available | OFF — 3× the entries, and we serve no device variants |
+| Sort query string | available | **ON** — verified working |
+| Ignore query string (toggle) | available | **OFF** — all-or-nothing; would collide `?maxage=300` with `?maxage=60` |
+| Query string: include/exclude specific params | **Enterprise only** | unavailable — the `utm_` fix needs a Worker |
+
+**Verified:** with Sort query string on, `?a=1&b=2&c=3`, `?c=3&b=2&a=1` and
+`?b=2&a=1&c=3` produced **1 origin hit**. Parameter order no longer fragments
+the cache.
+
+**Still unfixed:** `utm_source` / `fbclid` fragmentation, because excluding
+specific parameters is Enterprise. This is what the Worker in Module 4 solves.
+
+**Cache deception armor** defends against web cache deception:
+
+1. attacker sends the victim `https://site.com/account/settings/x.css`
+2. the app ignores the junk suffix and renders the victim's real account page
+3. the CDN sees `.css`, concludes "static asset", and caches it publicly
+4. the attacker fetches the same URL and receives the victim's cached page
+
+The attack rests on the same fact that made `/static/app.v1.js` cache with no
+configuration: **eligibility is decided by file extension, not by response
+content.** Armor checks the extension against the actual `Content-Type` first.
+
+Note the dashboard warning: changing any cache-key setting orphans every existing
+entry — a purge-everything with extra steps. On a busy site that sends all
+traffic to the origin at once, which is a self-inflicted thundering herd.
