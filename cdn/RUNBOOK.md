@@ -381,7 +381,120 @@ Other measurement facts established:
 - [x] Module 0 — instrumented origin + measurement toolkit
 - [x] Module 1 — baseline latency, no CDN
 - [x] Module 2 — Cloudflare in front, proxy mechanics
-- [ ] Module 3 — caching strategies: make `/api/*` cacheable
+- [~] Module 3 — caching strategies: make `/api/*` cacheable (in progress)
 - [ ] Module 4 — path-based routing
 - [ ] Module 5 — invalidation
 - [ ] Module 6 — thundering herd
+
+---
+
+## Module 3 — caching strategies
+
+### Eligibility and duration are two separate decisions
+
+    1. ELIGIBILITY  Cloudflare: may I cache this at all?   <- file extension, or a Cache Rule
+    2. DURATION     Your Cache-Control: for how long?      <- only read if step 1 passed
+
+**Proof.** `/cache?maxage=300` sends a textbook `public, max-age=300`. Before any
+rule, 4 requests → `DYNAMIC` ×4, 4 origin hits. Cloudflare decides eligibility by
+**file extension** (`.js`, `.css`, `.jpg`, …), and an extensionless path like
+`/cache` or `/api/time` is ineligible — so its `Cache-Control` is never even read.
+
+This is Cloudflare-specific. Fastly and Akamai honour `Cache-Control` for any
+content type. "Does the CDN cache by default, or only what you tell it to?" is a
+real architectural difference between vendors.
+
+**The Cache Rule** (Caching → Cache Rules), scoped to the lab host only:
+
+    http.host eq "cdn-lab.drkreddy.com" and not starts_with(http.request.uri.path, "/stats")
+    -> Cache eligibility: Eligible for cache
+    -> Edge TTL:    Use cache-control header if present, bypass cache if not
+    -> Browser TTL: Respect origin TTL
+
+`/stats` is excluded because it is the instrument the experiments read.
+
+**Result:** `/cache?maxage=300` → `MISS` then `HIT HIT HIT`, TTFB 254ms → 56ms,
+origin hits frozen at 1.
+
+### DYNAMIC vs BYPASS — a two-word diagnostic
+
+| Status | Meaning | Where to fix |
+|---|---|---|
+| `DYNAMIC` | not eligible; Cloudflare never considered it | the Cache Rule |
+| `BYPASS` | eligible, but a header declined | the `Cache-Control` |
+
+After the rule, `/api/time` (which sends `no-store`) moved from `DYNAMIC` to
+`BYPASS` — 4 requests, 4 origin hits. **The rule grants permission, the header
+exercises it**, so the application keeps per-endpoint control.
+
+A too-narrow rule also shows up as `DYNAMIC`: `/vary` read `DYNAMIC` purely
+because the first rule expression only matched `/cache` and `/api/`.
+
+### max-age vs s-maxage
+
+    Cache-Control: public, max-age=0, s-maxage=300
+
+`max-age` speaks to every cache including browsers; `s-maxage` speaks only to
+**shared** caches (CDNs, proxies). The pair above means *browsers always
+revalidate, CDN shields the origin for 5 minutes*.
+
+Measured: `MISS` then `HIT HIT HIT` despite `max-age=0`. The workhorse pattern
+for dynamic content — users get fresh data, the database sees one request per
+5 minutes per PoP instead of one per user.
+
+### Query strings fragment the cache
+
+Cloudflare's default cache key includes the **full query string**. Five requests
+for one logical object:
+
+    /cache?maxage=300                               HIT
+    /cache?maxage=300&utm_source=twitter            MISS
+    /cache?maxage=300&utm_source=facebook           MISS
+    /cache?maxage=300&fbclid=abc123                 MISS
+    /cache?maxage=300&utm_source=twitter&utm_medium=social  MISS
+    -> 4 origin hits for ONE object
+
+Tracking parameters are appended by platforms you do not control, so a site with
+perfect headers can still run a terrible hit rate. Fixes, in order of preference:
+
+1. normalise the cache key at the edge (Cache Rules → Cache Key → Query String;
+   may be gated by plan)
+2. strip the params in a Worker before cache lookup — Module 4
+3. keep them out of URLs — rarely within your control
+
+### stale-while-revalidate is NOT honoured on the free plan
+
+    Cache-Control: s-maxage=10, stale-while-revalidate=120
+
+    t=0   MISS      primed
+    t=1   HIT       age=0, fresh
+    t=14  EXPIRED   <-- client WAITED for the origin round trip
+    t=15  HIT       age=0, refreshed
+
+SWR promises: serve the stale copy instantly (`HIT`, `age=14`) and refresh in the
+background so nobody waits. Cloudflare instead revalidated **synchronously** —
+`EXPIRED` means the client paid the full origin latency. Serving stale is a paid
+feature.
+
+This matters for Module 6. SWR is the standard defence against cache stampedes:
+when a hot object expires, one request refreshes it while everyone else gets the
+stale copy. Without it, every request arriving during a refresh piles onto the
+origin. We will build this by hand in a Worker.
+
+### Commands
+
+    # is it the rule or the header? read cf-cache-status
+    curl -sSI "$U/cache?maxage=300" | grep -i cf-cache-status
+
+    # browser vs edge TTL
+    ./tools/probe.sh "$U/cache?maxage=0&smaxage=300" 4
+
+    # query-string fragmentation
+    for q in "" "&utm_source=twitter" "&fbclid=abc"; do
+      curl -sSI "$U/cache?maxage=300$q" | grep -i cf-cache-status
+    done
+
+    # does this CDN serve stale? watch for HIT-with-high-age vs EXPIRED
+    curl -sSI "$U/cache?maxage=0&smaxage=10&swr=120"   # prime
+    sleep 13
+    curl -sSI "$U/cache?maxage=0&smaxage=10&swr=120"   # EXPIRED = no SWR
