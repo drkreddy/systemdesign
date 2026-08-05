@@ -1,0 +1,19 @@
+# Origin is placed in Oregon on purpose. Measuring from India, that is roughly
+# 13,000 km each way — ~220ms of round-trip propagation delay that no amount of
+# server tuning can remove. Erasing that gap is what Module 2 demonstrates.
+services:
+  - type: web
+    name: cdn-lab-origin
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: origin
+    buildCommand: npm install
+    startCommand: node server.js
+    # Render's own health checks also double as a partial keepalive, though on
+    # the free plan the service still idles out after ~15 minutes without
+    # external traffic. See tools/keepalive.sh before running any experiment.
+    healthCheckPath: /health
+    envVars:
+      - key: ORIGIN_REGION
+        value: oregon

@@ -11,8 +11,10 @@ mislead; the counter cannot.
 ## Layout
 
     origin/server.js   instrumented origin — zero dependencies, plain node:http
-    origin/fly.toml    pinned to iad (Virginia), deliberately far from India
+    render.yaml        Render blueprint, pinned to Oregon (far from India on purpose)
     tools/probe.sh     per-phase latency breakdown + cache-status reader
+    tools/keepalive.sh holds the free-tier origin awake during a lab session
+    dns-backup/        pre-migration snapshot of drkreddy.com — restore reference
 
 ## Modules
 

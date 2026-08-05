@@ -3,8 +3,10 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 
 const PORT = process.env.PORT || 8080;
-const REGION = process.env.FLY_REGION || 'local';
-const INSTANCE = (process.env.FLY_MACHINE_ID || os.hostname()).slice(0, 8);
+// Render does not expose its region as an env var, so ORIGIN_REGION is set
+// explicitly in render.yaml. Keeps the label honest wherever this is deployed.
+const REGION = process.env.ORIGIN_REGION || process.env.FLY_REGION || 'local';
+const INSTANCE = (process.env.RENDER_INSTANCE_ID || process.env.FLY_MACHINE_ID || os.hostname()).slice(0, 8);
 
 // ---------------------------------------------------------------------------
 // Instrumentation.

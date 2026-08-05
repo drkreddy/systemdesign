@@ -1,0 +1,71 @@
+# Authoritative DNS for drkreddy.com captured 2026-08-05T05:45:15Z
+# Source: ns1.dns-parking.com (Hostinger). Restore reference before Cloudflare migration.
+
+## SOA @apex
+drkreddy.com.		3600	IN	SOA	ns1.dns-parking.com. dns.hostinger.com. 2026073001 10000 2400 604800 600
+
+## NS @apex
+drkreddy.com.		86400	IN	NS	ns2.dns-parking.com.
+drkreddy.com.		86400	IN	NS	ns1.dns-parking.com.
+
+## A @apex
+drkreddy.com.		1800	IN	A	2.57.91.91
+
+## AAAA @apex
+drkreddy.com.		1800	IN	AAAA	2a02:4780:84::32
+
+## MX @apex
+drkreddy.com.		14400	IN	MX	10 mx2.hostinger.com.
+drkreddy.com.		14400	IN	MX	5 mx1.hostinger.com.
+
+## TXT @apex
+drkreddy.com.		3600	IN	TXT	"v=spf1 include:_spf.mail.hostinger.com ~all"
+
+## CNAME @apex
+
+## CAA @apex
+
+## www
+www.drkreddy.com.	3789	IN	HINFO	"RFC8482" ""
+
+## mail
+mail.drkreddy.com.	3789	IN	HINFO	"RFC8482" ""
+
+## ftp
+ftp.drkreddy.com.	3789	IN	HINFO	"RFC8482" ""
+
+## cpanel
+cpanel.drkreddy.com.	3789	IN	HINFO	"RFC8482" ""
+
+## webmail
+webmail.drkreddy.com.	3789	IN	HINFO	"RFC8482" ""
+
+## autodiscover
+autodiscover.drkreddy.com. 3789	IN	HINFO	"RFC8482" ""
+
+## _dmarc
+_dmarc.drkreddy.com.	3789	IN	HINFO	"RFC8482" ""
+
+## hostingermail-a._domainkey
+hostingermail-a._domainkey.drkreddy.com. 3789 IN HINFO "RFC8482" ""
+
+## targeted subdomain queries (ANY is refused per RFC 8482 — must ask by type)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+dig: '.drkreddy.com' is not a legal name (empty label)
+
+## CONFIRMED COMPLETE RECORD SET TO RECREATE IN CLOUDFLARE
+A     @      2.57.91.91                                    (Hostinger; 301s to drkreddy.github.io)
+AAAA  @      2a02:4780:84::32
+CNAME www    drkreddy.com
+MX    @      mx1.hostinger.com  priority 5     <-- EMAIL
+MX    @      mx2.hostinger.com  priority 10    <-- EMAIL
+TXT   @      "v=spf1 include:_spf.mail.hostinger.com ~all"
+TXT   _dmarc "v=DMARC1; p=none"
+No DKIM records published. No CAA records.
