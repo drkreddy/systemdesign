@@ -376,18 +376,6 @@ Other measurement facts established:
 - **After caching, DNS becomes the bottleneck.** In run 2, TTFB was 9-38ms while
   DNS was 132ms (Mumbai), 304ms (Cape Town). Fix one bottleneck, meet the next.
 
-## Status
-
-- [x] Module 0 — instrumented origin + measurement toolkit
-- [x] Module 1 — baseline latency, no CDN
-- [x] Module 2 — Cloudflare in front, proxy mechanics
-- [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
-- [ ] Module 4 — path-based routing
-- [ ] Module 5 — invalidation
-- [ ] Module 6 — thundering herd
-
----
-
 ## Module 3 — caching strategies
 
 ### Eligibility and duration are two separate decisions
@@ -577,3 +565,85 @@ content.** Armor checks the extension against the actual `Content-Type` first.
 Note the dashboard warning: changing any cache-key setting orphans every existing
 entry — a purge-everything with extra steps. On a busy site that sends all
 traffic to the origin at once, which is a self-inflicted thundering herd.
+
+---
+
+## Module 4 — path-based routing in a Worker
+
+`worker/src/index.js`, deployed to `cdn-lab.drkreddy.com/*` via
+`worker/wrangler.toml`.
+
+### Why code instead of dashboard rules
+
+Three things drove this, all measured earlier in the lab:
+
+| Need | Config on free plan | Worker |
+|---|---|---|
+| different policy per path | possible, one rule each | one ordered table |
+| drop `utm_`/`fbclid` from the cache key | **Enterprise only** | yes |
+| `stale-while-revalidate` | **not honoured** | yes |
+
+Secondary but real: the policy lives in git, is reviewed in a PR, and rolls back
+with a revert. A dashboard rule has none of that.
+
+### The policy table
+
+    /stats, /admin/*   never cache        it is the instrument the experiments read
+    /static/*          1 year, immutable  fingerprinted URLs never need invalidating
+    /api/*             edge 30s, browser 0s, SWR 120s
+    everything else    edge 60s, browser 0s, SWR 120s
+
+First match wins, so specific prefixes precede general ones.
+
+### Deploy
+
+    npm install -g wrangler
+    wrangler login          # interactive — needs a real terminal
+    cd worker && wrangler deploy
+    wrangler tail           # live request log from the edge
+
+### Two bugs worth keeping
+
+**Double fetch.** `new Response((await fetch(request)).body, await fetch(request))`
+issues *two* origin requests and consumes a body twice. It would have doubled
+origin load on every non-GET.
+
+**`cache.match()` will not return an entry that has expired per its own
+`Cache-Control`.** Storing with `s-maxage=edgeTtl` therefore deletes the entry at
+exactly the moment the stale-while-revalidate window opens, leaving nothing to
+serve stale. SWR would silently never fire — and it would *look* like it worked,
+because the symptom is a `MISS`, which reads as an ordinary cold cache.
+
+Fix: store with `s-maxage = edgeTtl + swr` so the entry survives the whole
+window, and track freshness separately via an `X-Edge-Stored-At` timestamp.
+
+**The cache's notion of "expired" and the application's notion of "stale" must be
+different, or serve-stale cannot be implemented at all.** This generalises to
+Redis, Memcached and any application-level cache.
+
+Related: only `status === 200` is stored. Caching a 500 turns a transient origin
+blip into a sustained outage served from the edge.
+
+### Observability
+
+Every response carries edge-set headers, so behaviour is observable rather than
+inferred:
+
+    X-Edge-Route    which policy matched
+    X-Edge-Cache    HIT | MISS | STALE | BYPASS | BYPASS-METHOD
+    X-Edge-Age      seconds since stored
+
+`STALE` is the one to watch — it means a user was served instantly from cache
+while the refresh happened behind them.
+
+---
+
+## Status
+
+- [x] Module 0 — instrumented origin + measurement toolkit
+- [x] Module 1 — baseline latency, no CDN
+- [x] Module 2 — Cloudflare in front, proxy mechanics
+- [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
+- [~] Module 4 — path-based routing in a Worker (written; awaiting `wrangler login`)
+- [ ] Module 5 — invalidation
+- [ ] Module 6 — thundering herd
