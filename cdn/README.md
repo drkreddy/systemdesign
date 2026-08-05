@@ -61,3 +61,24 @@ timestamps, so they sum to TOTAL:
     ttfb   server think time — what a cache HIT collapses to ~0
     xfer   streaming the body — bandwidth-bound, not latency-bound
     oh     X-Origin-Hit; frozen across requests = genuine cache hits
+
+## Measuring from around the world
+
+`tools/globe.sh` runs measurements from ~10 real machines worldwide via the
+Globalping API (free, no auth).
+
+    ./tools/globe.sh ping <host> [label]      ICMP RTT per probe
+    ./tools/globe.sh http <url>  [label]      full timing breakdown per probe
+
+The probe list is fixed on purpose: a before/after comparison is only valid if
+both runs come from the same places. Change the locations between runs and you
+are measuring the probe list, not the CDN. Every run is saved to
+`results/<label>.json` so the pre-CDN baseline survives for later diffing.
+
+Two things the smoke test against a Cloudflare-fronted site already showed:
+
+- Anycast does not always reach the nearest PoP. A Pretoria probe was served
+  from Bucharest, a Falkenstein probe from Sofia. BGP follows peering
+  relationships, not distance.
+- One probe reported 2034ms of DNS while its neighbours reported 5ms. Single
+  samples lie; read the median.
