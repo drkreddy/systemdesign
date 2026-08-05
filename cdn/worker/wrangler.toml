@@ -1,0 +1,9 @@
+name = "cdn-lab-edge"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Bound to the lab hostname only. The zone's other hostnames — the live site and
+# everything mail-related — must never route through this Worker.
+[[routes]]
+pattern = "cdn-lab.drkreddy.com/*"
+zone_name = "drkreddy.com"
