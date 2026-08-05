@@ -1,0 +1,6 @@
+# Secrets. This repository is PUBLIC — a committed API token is a live
+# credential the moment it is pushed, and rewriting history does not un-leak it.
+.env
+.env.*
+*.token
+secrets/
