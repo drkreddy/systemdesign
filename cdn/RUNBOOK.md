@@ -644,6 +644,83 @@ while the refresh happened behind them.
 - [x] Module 1 — baseline latency, no CDN
 - [x] Module 2 — Cloudflare in front, proxy mechanics
 - [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
-- [~] Module 4 — path-based routing in a Worker (written; awaiting `wrangler login`)
+- [x] Module 4 — path-based routing in a Worker (deployed; SWR + key normalisation verified)
 - [ ] Module 5 — invalidation
 - [ ] Module 6 — thundering herd
+
+### Module 4 results
+
+Deployed with `wrangler deploy`. Route matching verified:
+
+    /stats              route=never-cache        BYPASS
+    /static/app.v1.js   route=immutable-assets   HIT
+    /api/time           route=api-dynamic        MISS
+    /cache?maxage=300   route=default            HIT
+
+**Cache-key normalisation works.** The same test that produced 4 origin hits in
+Module 3 — plain URL plus `utm_source`, `fbclid`, `gclid` and a two-param
+combination — produced **6 requests, 1 origin hit**. The Enterprise-gated
+feature, implemented in ~10 lines.
+
+**stale-while-revalidate works.** Origin deliberately slow (2000ms), route edge
+TTL 30s / SWR 120s:
+
+    t=0   MISS    age=0    2380ms   waited for the slow origin
+    t=2   HIT     age=0     171ms
+    t=35  STALE   age=33    165ms   <-- served instantly despite a 2s origin
+    t=38  HIT     age=3     188ms   refreshed behind the user
+
+### The most important bug in this lab: two stacked caches
+
+First SWR run looked perfect and was completely broken.
+
+    browser -> [Worker caches.default] -> fetch(request) -> [Cloudflare zone cache] -> origin
+                    our SWR logic                              the Module 3 Cache Rule
+
+A Worker's `fetch()` to its own route is still served by **Cloudflare's zone
+cache**. So the background "refresh from origin" read Cloudflare's cached copy
+and wrote it back into our cache as though it were fresh.
+
+Symptom, across a full SWR cycle:
+
+    prime          origin_hit=1  generated_at=19:46:12
+    stale          origin_hit=1  generated_at=19:46:12
+    after refresh  origin_hit=1  generated_at=19:46:12   <-- never changed
+
+`X-Edge-Cache` cycled `MISS → HIT → STALE → HIT`, age reset correctly, response
+times were excellent. **Content could never update, forever, and every header
+reported perfect health.** A stale-forever cache is worse than no cache, because
+it is silent.
+
+Only the origin-side counter caught it. This is why `/stats` exists.
+
+**Attempted fix that did NOT work:** `fetch(request, { cf: { cacheTtl: 0 } })`.
+Still served from the zone cache.
+
+**Actual fix:** address the origin by its own hostname, so our zone's cache is
+not in the path at all.
+
+    const ORIGIN_HOST = 'cdn-lab-origin.onrender.com';
+    function toOrigin(request) {
+      const u = new URL(request.url);
+      u.hostname = ORIGIN_HOST;
+      return new Request(u.toString(), request);
+    }
+
+Routed through a single helper so no code path can accidentally re-enter the
+zone cache. Verified after the fix:
+
+    prime          origin_hit=1  generated_at=19:51:43
+    stale (age=65) origin_hit=1  generated_at=19:51:43   old copy, served instantly
+    after refresh  origin_hit=2  generated_at=19:52:49   NEW data from Oregon
+
+**Generalisable lesson:** when you add a cache in front of something that is
+already cached, revalidation silently reads the inner cache. Applies to a Worker
+over a CDN, an app cache over a read replica, or Redis over a query cache the
+database keeps. Always verify freshness against the **system of record**, never
+against the layer beneath you.
+
+### Cost of a hedge that did not pay
+
+`cf: { cacheTtl: 0 }` was left in place alongside the hostname fix. It does not
+work on its own but is harmless, and documents the attempt.

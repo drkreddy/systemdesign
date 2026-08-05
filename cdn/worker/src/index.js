@@ -12,6 +12,11 @@
 // policy matched and what the cache did, so behaviour is observable from curl
 // rather than inferred.
 
+// The origin's own hostname. Requests are sent here rather than back through
+// cdn-lab.drkreddy.com so that Cloudflare's zone cache never sits between this
+// Worker and the origin — see the note in fetchAndStore.
+const ORIGIN_HOST = 'cdn-lab-origin.onrender.com';
+
 // Params that never change the response body. Stripping them from the cache key
 // collapses every tracking-decorated variant of a URL onto one entry. Measured
 // before this existed: 5 requests for one object produced 4 origin hits.
@@ -67,6 +72,14 @@ const ROUTES = [
 
 const pickRoute = (pathname) => ROUTES.find((r) => r.test(pathname));
 
+// Every origin request goes through here, so no code path can accidentally
+// re-enter Cloudflare's zone cache by requesting our own proxied hostname.
+function toOrigin(request) {
+  const u = new URL(request.url);
+  u.hostname = ORIGIN_HOST;
+  return new Request(u.toString(), request);
+}
+
 // The cache key is a synthetic GET Request. Building it explicitly — rather than
 // letting Cloudflare derive one from the incoming request — is what makes
 // normalisation possible.
@@ -97,7 +110,21 @@ const age = (res) => {
 
 // Fetch from origin and store. Returns the response to serve.
 async function fetchAndStore(request, cacheKey, route, cache, ctx) {
-  const originRes = await fetch(request);
+  // Fetch the origin by its OWN hostname rather than re-requesting our proxied
+  // one. This is load-bearing, not a tidy-up.
+  //
+  // A Worker's fetch() to its own route is still served by Cloudflare's zone
+  // cache, so a plain fetch(request) during revalidation reads Cloudflare's
+  // cached copy instead of the origin, then writes it back into our cache as
+  // though it were fresh. Measured: three requests spanning a full SWR cycle all
+  // returned the same generated_at with the origin counter stuck at 1 — content
+  // could never update, while every cache header reported perfect health.
+  //
+  // cf: { cacheTtl: 0 } was tried first and did NOT prevent the cached read.
+  // Addressing the origin directly is what actually removes the second layer.
+  const originRes = await fetch(toOrigin(request), {
+    cf: { cacheTtl: 0, cacheEverything: false },
+  });
 
   // Only successful, complete responses are worth storing. Caching a 500 turns
   // a transient origin blip into a sustained outage served from the edge, and a
@@ -139,14 +166,14 @@ export default {
 
     // Anything not idempotent must reach the origin untouched.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      const originRes = await fetch(request);
+      const originRes = await fetch(toOrigin(request));
       const res = new Response(originRes.body, originRes);
       res.headers.set('X-Edge-Cache', 'BYPASS-METHOD');
       return res;
     }
 
     if (!route.cache) {
-      const originRes = await fetch(request);
+      const originRes = await fetch(toOrigin(request), { cf: { cacheTtl: 0 } });
       const res = new Response(originRes.body, originRes);
       res.headers.set('X-Edge-Route', route.name);
       res.headers.set('X-Edge-Cache', 'BYPASS');
