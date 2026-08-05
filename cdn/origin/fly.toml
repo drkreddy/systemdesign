@@ -1,0 +1,21 @@
+# Origin is pinned to Virginia on purpose. You are measuring from India, so
+# every uncached request pays ~200ms of round-the-planet propagation delay.
+# That gap is what the CDN is going to erase in Module 2.
+app = "cdn-lab-origin"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Both set to false: a machine that sleeps would add cold-start time to the
+  # first request and contaminate every latency number in this lab.
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

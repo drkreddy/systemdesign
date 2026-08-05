@@ -1,0 +1,10 @@
+{
+  "name": "cdn-lab-origin",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Instrumented origin server for the CDN lab",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
