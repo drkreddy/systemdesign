@@ -69,3 +69,16 @@ MX    @      mx2.hostinger.com  priority 10    <-- EMAIL
 TXT   @      "v=spf1 include:_spf.mail.hostinger.com ~all"
 TXT   _dmarc "v=DMARC1; p=none"
 No DKIM records published. No CAA records.
+
+## CORRECTION — the list above was INCOMPLETE.
+## A DNS zone cannot be enumerated from outside: ANY is refused (RFC 8482) and
+## AXFR is denied. The list above was only the hostnames I guessed correctly.
+## Cloudflare's onboarding scan additionally found:
+A     ai                             2.57.91.91
+CNAME autoconfig                     autoconfig.mail.hostinger.com
+CNAME autodiscover                   autodiscover.mail.hostinger.com
+CNAME hostingermail-a._domainkey     hostingermail-a.dkim.mail.hostinger.com   <-- DKIM
+CNAME hostingermail-b._domainkey     hostingermail-b.dkim.mail.hostinger.com   <-- DKIM
+CNAME hostingermail-c._domainkey     hostingermail-c.dkim.mail.hostinger.com   <-- DKIM
+## Cloudflare's scan is also a dictionary, not an enumeration. The only
+## authoritative source is Hostinger's own DNS zone editor.
