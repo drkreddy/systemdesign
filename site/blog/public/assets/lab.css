@@ -259,3 +259,27 @@ label.ctl input[type="checkbox"] { accent-color: var(--edge); }
 .card p { margin: 0; font-size: .9rem; color: var(--ink-2); }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* --- rate-limit lab controls --- */
+.lab-head select,
+.lab-head input[type="range"] {
+  font-family: var(--mono); font-size: .78rem;
+  background: var(--ground-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 3px; padding: .2em .4em;
+}
+.lab-head input[type="range"] { padding: 0; width: 6.5rem; accent-color: var(--edge); }
+.lab-head select:focus-visible,
+.lab-head input:focus-visible { outline: 2px solid var(--edge); outline-offset: 1px; }
+
+/* The timeline is wider than a phone; let it scroll rather than squash the
+   marks until simultaneous requests become unreadable. */
+.lab-body svg { display: block; width: 100%; min-width: 480px; height: auto; }
+.lab .lab-body { overflow-x: auto; }
+
+/* Legend chips reuse the same encoding as every other lab: teal passed,
+   ochre refused. */
+.legend { display: flex; gap: 1rem; flex-wrap: wrap; margin: .8rem 0 0; font-size: .82rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: .4rem; }
+.legend i { width: 14px; height: 6px; border-radius: 2px; display: inline-block; }
+.legend i.ok { background: var(--edge); }
+.legend i.no { background: var(--origin); }

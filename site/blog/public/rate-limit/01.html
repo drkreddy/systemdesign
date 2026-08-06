@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Counting requests is harder than it looks — rate limiting lab</title>
+<meta name="description" content="Why services refuse requests, and why the obvious way to count them has a hole in it.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/rate-limit/02">Next: the boundary burst →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">Rate limiting · post 1 of 5</p>
+<h1>Counting requests is harder than it looks</h1>
+<p class="standfirst">Every rate limiter answers one question — has this client had too many? — and the obvious way to answer it is wrong in a way you can exploit deliberately.</p>
+
+<p>A rate limiter exists because capacity is finite and demand is not. It shows up in four different jobs that look similar and aren't:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Purpose</th><th>What you're really protecting</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Capacity</strong></td><td>the service staying up when one client misbehaves</td></tr>
+    <tr><td><strong>Fairness</strong></td><td>one noisy tenant not starving the quiet ones</td></tr>
+    <tr><td><strong>Cost</strong></td><td>your bill, when each request costs real money downstream</td></tr>
+    <tr><td><strong>Abuse</strong></td><td>credential stuffing, scraping, enumeration</td></tr>
+  </tbody>
+</table></div>
+
+<p>Those want different things. A fairness limiter should be generous to bursts and strict on sustained load. An abuse limiter should be the opposite. Picking an algorithm without deciding which job you're doing is how people end up with limits that block real users and miss real attackers.</p>
+
+<h2>The obvious implementation</h2>
+
+<p>Divide time into windows. Count requests per window. Refuse anything over the limit. Reset the counter when the window ends.</p>
+
+<pre><code>window = floor(now / 60s)
+if window != current: current = window; count = 0
+if count &lt; limit: count++; allow
+else: refuse with 429</code></pre>
+
+<p>It's a handful of lines, needs one counter per client, and is the first thing almost everyone writes. Against ordinary traffic it behaves exactly as advertised:</p>
+
+<div class="lab"
+     data-widget="rl-compare"
+     data-limit="10"
+     data-window="60"
+     data-algorithms="fixed-window"
+     data-patterns="steady,rampup,bursty"
+     data-title="Fixed window, against three traffic shapes">
+</div>
+
+<p class="legend">
+  <span><i class="ok"></i> allowed</span>
+  <span><i class="no"></i> refused</span>
+  <span>dashed lines mark window boundaries</span>
+</p>
+
+<p>Steady traffic at exactly the limit passes untouched. A ramp-up gets throttled once the budget is spent. A mid-window burst of double the limit gets exactly half through. All correct, all what you'd want.</p>
+
+<dl class="def">
+  <dt>limit and window</dt>
+  <dd>The two numbers that define the policy: "100 requests per minute" is a limit of 100 and a window of 60 seconds. Almost every limiter is a different answer to <em>how you measure the window</em>.</dd>
+</dl>
+
+<dl class="def">
+  <dt>429 Too Many Requests</dt>
+  <dd>The status code for "you're being limited". Distinct from 503, which means the server is struggling, and from 403, which means you're not allowed at all. Post 5 covers what else belongs in that response — the answer is more than just the status code.</dd>
+</dl>
+
+<h2>The hole</h2>
+
+<p>Look at the dashed lines in the widget above. The counter resets on a boundary that is a property of the clock, not of the client — and it's a boundary the client can calculate exactly as easily as the server can.</p>
+
+<p>If the window resets at the top of every minute, and you know that, then <strong>the limit is not really per minute</strong>. It's per minute measured from a moment you get to choose.</p>
+
+<div class="note">
+  <span class="tag">Try predicting it</span>
+  <p>A limit of 10 per minute. A client sends 10 requests at 0:59, then 10 more at 1:01. Twenty requests in two seconds. How many does a fixed window allow?</p>
+  <p>The answer is in post 2, and it's worse than most people guess.</p>
+</div>
+
+<p>The rest of this lab is about closing that hole, and about what you give up to close it — because every fix costs either memory, accuracy, or both.</p>
+
+<div class="postnav">
+  <a href="/">← All posts</a>
+  <a href="/rate-limit/02">Next: the boundary burst →</a>
+</div>
+
+</div>
+<script type="module" src="/assets/ratelimit-widgets.js"></script>
+</body>
+</html>

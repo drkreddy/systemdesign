@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token bucket: allowing bursts on purpose — rate limiting lab</title>
+<meta name="description" content="Real clients are bursty. A limiter that punishes every burst punishes normal behaviour. How token buckets separate rate from burst.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/rate-limit/02">← Previous</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">Rate limiting · post 3 of 5</p>
+<h1>Token bucket: allowing bursts on purpose</h1>
+<p class="standfirst">The window algorithms all treat a burst as something to survive. Token buckets treat it as something to budget for — which is usually closer to what you actually want.</p>
+
+<p>Real clients are bursty. A page loads and fires twelve requests at once. A mobile app comes back from the background and syncs. A cron job wakes at midnight with everything queued behind it. None of that is abuse, and a limiter that refuses it is refusing normal behaviour.</p>
+
+<p>Window algorithms can't express this. They have one number, and it has to serve two purposes at once: <em>how much sustained traffic do I permit</em>, and <em>how much can arrive at once</em>. Set it low and you break legitimate bursts. Set it high and you permit sustained load you can't handle.</p>
+
+<h2>Two numbers instead of one</h2>
+
+<p>A token bucket separates them. Tokens drip in at a fixed <strong>rate</strong>; the bucket holds at most <strong>burst</strong> of them. Each request spends one, and a request with no token available is refused.</p>
+
+<pre><code>tokens = min(burst, tokens + elapsed * rate)
+if tokens &gt;= 1: tokens -= 1; allow
+else: refuse</code></pre>
+
+<p>The consequences fall out of those two lines. Sustained throughput can never exceed the refill rate, because that's the only source of tokens. A client that has been quiet accumulates up to a full bucket, so it can burst that much instantly. And the bucket is a hard ceiling — idling for an hour doesn't earn an hour's worth of credit.</p>
+
+<p>Drag the controls. The traffic is fixed: twenty requests at once, then steady arrivals afterwards.</p>
+
+<div class="lab"
+     data-widget="rl-bucket"
+     data-title="Twenty at once, then steady traffic">
+</div>
+
+<p class="legend">
+  <span><i class="ok"></i> allowed</span>
+  <span><i class="no"></i> refused</span>
+</p>
+
+<p>Worth doing deliberately: set the <strong>bucket to 1</strong> and you have a pure rate limiter with no burst tolerance at all — the opening twenty collapses to a single allowed request. Then raise the bucket while leaving the refill rate alone. The sustained portion behaves identically; only the opening burst changes. <strong>That separation is the whole feature.</strong></p>
+
+<dl class="def">
+  <dt>rate</dt>
+  <dd>Sustained throughput. Over a long enough period, this is the only number that matters.</dd>
+</dl>
+<dl class="def">
+  <dt>burst (bucket size)</dt>
+  <dd>How much a client that has been quiet may spend at once. Also the maximum credit that can ever accumulate.</dd>
+</dl>
+
+<h2>Leaky bucket, and why it's the same picture upside down</h2>
+
+<p>You'll see leaky bucket named alongside token bucket as though they're alternatives. They're duals: a token bucket meters <em>permission to enter</em>, a leaky bucket meters <em>departure</em>, holding arrivals in a queue that drains at a fixed rate.</p>
+
+<p>The practical difference isn't the algorithm, it's what happens to excess traffic. A token bucket <strong>refuses</strong> it — the client learns immediately and can retry. A leaky bucket <strong>queues</strong> it — the client waits, and under sustained overload that queue becomes latency nobody asked for, then a memory problem, then a queue full of requests whose callers gave up long ago.</p>
+
+<p>For an HTTP API you almost always want to refuse. A fast 429 the client can act on beats a slow 200 nobody is waiting for any more. Queueing belongs where the work is genuinely asynchronous and the caller isn't blocked.</p>
+
+<h2>Choosing</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>Situation</th><th>Reach for</th><th>Because</th></tr></thead>
+  <tbody>
+    <tr><td>Public API, human-driven clients</td><td><strong>Token bucket</strong></td><td>page loads and syncs are bursty by nature</td></tr>
+    <tr><td>Protecting a fragile downstream</td><td>Token bucket, small bucket</td><td>burst tolerance is exactly what it can't absorb</td></tr>
+    <tr><td>Billing or quota metering</td><td>Sliding log</td><td>exactness matters more than memory</td></tr>
+    <tr><td>General-purpose gateway</td><td>Sliding counter</td><td>cheap, no boundary hole, small bounded error</td></tr>
+    <tr><td>Genuinely async work</td><td>Leaky bucket</td><td>nobody is blocked waiting on the queue</td></tr>
+  </tbody>
+</table></div>
+
+<div class="note">
+  <span class="tag">The question that picks the algorithm</span>
+  <p>Not "which is best" — it's <strong>"is a burst acceptable?"</strong> If yes, you need two numbers, and that means a token bucket. If no, one number is enough and a sliding counter is the cheapest way to enforce it honestly.</p>
+</div>
+
+<p>So far everything on this page has been a single limiter, holding its counters in one place. That assumption survives exactly as long as you run one server. <strong>Post 4</strong> is about what happens to all of this when there are twenty of them, each counting on its own.</p>
+
+<div class="postnav">
+  <a href="/rate-limit/02">← The boundary burst</a>
+  <a href="/">All posts →</a>
+</div>
+
+</div>
+<script type="module" src="/assets/ratelimit-widgets.js"></script>
+</body>
+</html>

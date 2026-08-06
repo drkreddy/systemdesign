@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The boundary burst — rate limiting lab</title>
+<meta name="description" content="Twice the limit in two seconds, entirely within the rules. How sliding windows close the hole, and what each one costs.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/rate-limit/01">← Previous</a>
+  <a href="/rate-limit/03">Next: token bucket →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">Rate limiting · post 2 of 5</p>
+<h1>The boundary burst</h1>
+<p class="standfirst">Twice your limit, in two seconds, without breaking a single rule you wrote down.</p>
+
+<p>Here is the attack, and it needs no tooling: a limit of 10 per minute, ten requests at <strong>0:59</strong>, ten more at <strong>1:01</strong>.</p>
+
+<p>Both groups obey the policy. The first ten fall in the window ending at 1:00 and the counter allows them. The second ten fall in the next window, where the counter has just reset to zero, so it allows them too. The server, asked afterwards, will insist it never exceeded 10 per minute — and it will be telling the truth about its own counters.</p>
+
+<p>Change the pattern in the widget and watch the three algorithms disagree:</p>
+
+<div class="lab"
+     data-widget="rl-compare"
+     data-limit="10"
+     data-window="60"
+     data-algorithms="fixed-window,sliding-log,sliding-counter"
+     data-patterns="boundary,steady,bursty"
+     data-title="Three algorithms, one traffic pattern">
+</div>
+
+<p class="legend">
+  <span><i class="ok"></i> allowed</span>
+  <span><i class="no"></i> refused</span>
+  <span>dashed line marks the window boundary</span>
+</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Algorithm</th><th>Allowed</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr><td>Fixed window</td><td class="n"><strong>20 of 20</strong></td><td>twice the limit, in two seconds</td></tr>
+    <tr><td>Sliding window log</td><td class="n">10 of 20</td><td>exactly correct</td></tr>
+    <tr><td>Sliding window counter</td><td class="n">11 of 20</td><td>very close, and reliably one over</td></tr>
+  </tbody>
+</table></div>
+
+<p>These aren't estimates. They come from the simulator this page runs, which has a test asserting each number exactly — so if the arithmetic ever drifts, the test fails rather than this post quietly becoming wrong.</p>
+
+<h2>Sliding window log: exact, and expensive</h2>
+
+<p>Keep a timestamp for every request. On each new one, discard anything older than the window and count what's left.</p>
+
+<pre><code>log = log.filter(t =&gt; t &gt; now - window)
+if log.length &lt; limit: log.push(now); allow
+else: refuse</code></pre>
+
+<p>There is no boundary to exploit, because there is no boundary — the window is always the last 60 seconds measured from <em>now</em>. It is exactly correct by construction.</p>
+
+<p>The cost is memory, and it scales with the wrong thing: <strong>one timestamp per request per client</strong>. A limit of 10,000 per minute means storing up to 10,000 timestamps for every client, and the clients generating the most load are the ones costing you the most memory. That's precisely backwards from what you want under attack.</p>
+
+<h2>Sliding window counter: two numbers, one assumption</h2>
+
+<p>Keep the count for the current window and the previous one. Weight the previous by how much of it still overlaps the trailing window:</p>
+
+<pre><code>elapsed = now - windowStart
+overlap = (window - elapsed) / window
+estimate = previousCount * overlap + currentCount
+if estimate &lt; limit: allow</code></pre>
+
+<p>Two integers per client, regardless of traffic. The boundary hole closes because the previous window's requests keep counting, fading out gradually instead of vanishing at a stroke.</p>
+
+<div class="note">
+  <span class="tag">Why it allows 11, not 10</span>
+  <p>The formula assumes the previous window's traffic was <strong>spread evenly</strong>. In this attack it wasn't — all ten arrived in the final second.</p>
+  <p>At 1:01 we're one second into the new window, so the previous one is weighted <code>59/60 = 0.983</code>. The estimate reads <code>10 × 0.983 = 9.83</code>, which is under 10, so one more request slips through before the count catches up.</p>
+  <p>That overshoot is the price of storing two integers instead of every timestamp. Worth knowing precisely: it's bounded and small, not a hole an attacker can widen.</p>
+</div>
+
+<h2>What you're actually choosing between</h2>
+
+<div class="tw"><table>
+  <thead><tr><th></th><th>Memory per client</th><th>Accuracy</th><th>Boundary exploit</th></tr></thead>
+  <tbody>
+    <tr><td>Fixed window</td><td class="n">1 integer</td><td>exact within a window</td><td style="color:var(--origin)"><strong>2× the limit</strong></td></tr>
+    <tr><td>Sliding log</td><td class="n">1 per request</td><td>exact</td><td>none</td></tr>
+    <tr><td>Sliding counter</td><td class="n">2 integers</td><td>slight overshoot</td><td>none</td></tr>
+  </tbody>
+</table></div>
+
+<p><strong>The sliding counter is what most production systems use</strong>, and this table is why. It costs the same as the naive approach, removes the exploit, and its error is a fraction over the limit rather than a multiple of it. Cloudflare, and most API gateways, land here.</p>
+
+<p>Reach for the log only when being exactly right matters more than memory — metering you bill customers for, say, where allowing an extra request is a rounding error you have to explain.</p>
+
+<div class="note">
+  <span class="tag">The general shape</span>
+  <p>Every algorithm here answers the same question with a different memory budget, and the differences only appear under adversarial traffic. Benchmarks against ordinary load would have shown all three as equivalent — which is exactly why the boundary burst is the pattern worth testing against.</p>
+</div>
+
+<div class="postnav">
+  <a href="/rate-limit/01">← Counting requests</a>
+  <a href="/rate-limit/03">Next: token bucket →</a>
+</div>
+
+</div>
+<script type="module" src="/assets/ratelimit-widgets.js"></script>
+</body>
+</html>

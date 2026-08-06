@@ -12,17 +12,19 @@
 <nav class="topbar"><div class="inner">
   <a class="home" href="/">drkreddy / labs</a>
   <a href="/cdn/01">CDN</a>
+  <a href="/rate-limit/01">Rate limiting</a>
 </div></nav>
 
 <div class="wrap">
 
-<p class="eyebrow">A lab you can run from this page</p>
-<h1>How a CDN actually works</h1>
-<p class="standfirst">Six short posts. Every claim came from measuring a real setup — an instrumented server in Oregon behind Cloudflare — and every experiment can be re-run from your browser, right now, against that same infrastructure.</p>
+<p class="eyebrow">Labs you can run from this page</p>
+<h1>Systems, measured rather than described</h1>
+<p class="standfirst">Short posts about infrastructure, each one built by measuring a real setup rather than repeating what the documentation claims. Every experiment runs from your browser.</p>
 
-<p>Most CDN explanations stop at "it keeps copies closer to users". That's true and it's not enough to work with. It doesn't tell you why turning a CDN on often caches <em>nothing</em>, why a cache can serve the wrong visitor's content while reporting perfect health, or why clearing your cache can make your site four times slower worldwide.</p>
+<h2>CDN <span style="font-weight:400;color:var(--ink-3);font-size:.7em">6 posts</span></h2>
+<p>Most explanations stop at "it keeps copies closer to users". That's true and it's not enough to work with. It doesn't tell you why turning a CDN on often caches <em>nothing</em>, why a cache can serve the wrong visitor's content while reporting perfect health, or why clearing your cache can make your site four times slower worldwide.</p>
 
-<p>Each post below has a <strong>Run it live</strong> button. The recorded numbers appear instantly; pressing the button fires real requests from your browser and shows you what actually happens today.</p>
+<p>Each post has a <strong>Run it live</strong> button. Recorded numbers appear instantly; pressing the button fires real requests against a server in Oregon behind Cloudflare.</p>
 
 <div class="cards">
   <a class="card" href="/cdn/01">
@@ -54,6 +56,27 @@
     <span class="n">06</span>
     <h3>The thundering herd</h3>
     <p>What happens when every cache empties at once — and which defence protects whom.</p>
+  </a>
+</div>
+
+<h2>Rate limiting <span style="font-weight:400;color:var(--ink-3);font-size:.7em">3 of 5 posts</span></h2>
+<p>Every limiter answers one question — has this client had too many? — and the obvious way to answer it lets a client take twice its limit without breaking a rule. These posts simulate the algorithms side by side, in your browser, with no network involved.</p>
+
+<div class="cards">
+  <a class="card" href="/rate-limit/01">
+    <span class="n">01</span>
+    <h3>Counting requests is harder than it looks</h3>
+    <p>Four different jobs a limiter does, and why the obvious implementation has a hole.</p>
+  </a>
+  <a class="card" href="/rate-limit/02">
+    <span class="n">02</span>
+    <h3>The boundary burst</h3>
+    <p>Twice the limit in two seconds, entirely within the rules. What each fix costs.</p>
+  </a>
+  <a class="card" href="/rate-limit/03">
+    <span class="n">03</span>
+    <h3>Token bucket: allowing bursts on purpose</h3>
+    <p>Real clients are bursty. Separating sustained rate from burst tolerance.</p>
   </a>
 </div>
 
