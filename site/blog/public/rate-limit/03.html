@@ -13,6 +13,7 @@
   <a class="home" href="/">drkreddy / labs</a>
   <a href="/">All posts</a>
   <a href="/rate-limit/02">← Previous</a>
+  <a href="/rate-limit/04">Next: distributed limiters →</a>
 </div></nav>
 
 <div class="wrap">
@@ -84,11 +85,11 @@ else: refuse</code></pre>
   <p>Not "which is best" — it's <strong>"is a burst acceptable?"</strong> If yes, you need two numbers, and that means a token bucket. If no, one number is enough and a sliding counter is the cheapest way to enforce it honestly.</p>
 </div>
 
-<p>So far everything on this page has been a single limiter, holding its counters in one place. That assumption survives exactly as long as you run one server. <strong>Post 4</strong> is about what happens to all of this when there are twenty of them, each counting on its own.</p>
+<p>So far everything on this page has been a single limiter, holding its counters in one place. That assumption survives exactly as long as you run one server. <a href="/rate-limit/04"><strong>Post 4</strong></a> is about what happens to all of this when there are twenty of them, each counting on its own.</p>
 
 <div class="postnav">
   <a href="/rate-limit/02">← The boundary burst</a>
-  <a href="/">All posts →</a>
+  <a href="/rate-limit/04">Next: distributed limiters →</a>
 </div>
 
 </div>
