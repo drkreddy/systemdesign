@@ -18,7 +18,7 @@ ORIGIN_BASE = "https://cdn-lab-origin.onrender.com"
 # a Cloudflare Rate Limiting Rule instead.
 [[kv_namespaces]]
 binding = "PLAY_META"
-id = "PLACEHOLDER_SET_BY_WRANGLER_KV_CREATE"
+id = "82282a4350a647c5a461595853ece8b7"
 
 # Replaces tools/keepalive.sh, which only ran while a terminal was open.
 [triggers]
