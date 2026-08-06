@@ -172,6 +172,18 @@ async function route(req, res, { path, q }) {
     }, { 'Cache-Control': cacheControl(q), 'X-Origin-Hit': String(n) });
   }
 
+  // Fails on demand, so edge resilience can be tested without taking the real
+  // origin down. ?status= chooses the failure code; ?ms= delays it first, to
+  // imitate an origin that is struggling rather than cleanly dead.
+  if (path === '/api/flaky') {
+    const n = record(path);
+    const status = clamp(q.get('status'), 400, 599, 500);
+    await sleep(clamp(q.get('ms'), 0, 20000, 0));
+    return json(res, status, {
+      failed_on_purpose: true, status, origin_hit: n, at: new Date().toISOString(),
+    }, { 'Cache-Control': cacheControl(q), 'X-Origin-Hit': String(n) });
+  }
+
   // The workhorse for the caching-strategy module: same body, arbitrary
   // Cache-Control assembled from the query string.
   //   /cache?maxage=0&smaxage=300&swr=60

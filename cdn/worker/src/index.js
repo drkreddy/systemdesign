@@ -88,6 +88,10 @@ const pickRoute = (pathname) => ROUTES.find((r) => r.test(pathname));
 // on every request would add latency to the hot path and defeat the point of
 // caching. The cost is that a purge takes up to GEN_MEMO_MS to be noticed by an
 // already-warm isolate, on top of KV's own global propagation delay.
+// How long past the stale window a copy is kept purely as outage insurance.
+// It is never served while the origin is healthy.
+const ERROR_GRACE = 86400;
+
 const GEN_MEMO_MS = 5000;
 const genMemo = new Map();
 
@@ -134,13 +138,27 @@ function buildCacheControl(route) {
   return parts.join(', ');
 }
 
+function serveStaleOnError(stale, route, gen, why) {
+  const res = new Response(stale.body, stale);
+  res.headers.set('X-Edge-Route', route.name);
+  res.headers.set('X-Edge-Gen', gen ?? '0');
+  res.headers.set('X-Edge-Cache', 'STALE-ERROR');
+  res.headers.set('X-Edge-Origin-Problem', why);
+  res.headers.set('Cache-Control', 'public, max-age=0');
+  return res;
+}
+
 const age = (res) => {
   const stored = res.headers.get('X-Edge-Stored-At');
   return stored ? Math.floor((Date.now() - Number(stored)) / 1000) : 0;
 };
 
 // Fetch from origin and store. Returns the response to serve.
-async function fetchAndStore(request, cacheKey, route, cache, ctx, gen) {
+// staleFallback: a cached copy that is too old to serve normally, kept as a
+// last resort. An origin that is down should degrade a site to slightly-old
+// content, not to an error page — the cache is already holding a better answer
+// than a 500.
+async function fetchAndStore(request, cacheKey, route, cache, ctx, gen, staleFallback) {
   // Fetch the origin by its OWN hostname rather than re-requesting our proxied
   // one. This is load-bearing, not a tidy-up.
   //
@@ -153,9 +171,19 @@ async function fetchAndStore(request, cacheKey, route, cache, ctx, gen) {
   //
   // cf: { cacheTtl: 0 } was tried first and did NOT prevent the cached read.
   // Addressing the origin directly is what actually removes the second layer.
-  const originRes = await fetch(toOrigin(request), {
-    cf: { cacheTtl: 0, cacheEverything: false },
-  });
+  let originRes;
+  try {
+    originRes = await fetch(toOrigin(request), { cf: { cacheTtl: 0, cacheEverything: false } });
+  } catch (err) {
+    if (staleFallback) return serveStaleOnError(staleFallback, route, gen, 'unreachable');
+    throw err;
+  }
+
+  // A 5xx means the origin is failing, not that the content changed. Serving the
+  // old copy keeps the site up; caching the 500 would spread the outage.
+  if (originRes.status >= 500 && staleFallback) {
+    return serveStaleOnError(staleFallback, route, gen, String(originRes.status));
+  }
 
   // Only successful, complete responses are worth storing. Caching a 500 turns
   // a transient origin blip into a sustained outage served from the edge, and a
@@ -181,9 +209,14 @@ async function fetchAndStore(request, cacheKey, route, cache, ctx, gen) {
   // begins — there would be nothing left to serve stale. Freshness is therefore
   // tracked by us via X-Edge-Stored-At, and s-maxage only bounds how long the
   // entry may survive at all.
+  // Jitter the stored lifetime by +/-15%. Without it, everything cached during a
+  // traffic spike expires together later, recreating the same spike against the
+  // origin on a loop. Spreading expiry breaks that synchronisation.
+  const jitter = 0.85 + Math.random() * 0.3;
+  const survive = Math.round((route.edgeTtl + (route.swr || 0) + ERROR_GRACE) * jitter);
   const toStore = res.clone();
   toStore.headers.set('X-Edge-Stored-At', String(Date.now()));
-  toStore.headers.set('Cache-Control', `public, s-maxage=${route.edgeTtl + (route.swr || 0)}`);
+  toStore.headers.set('Cache-Control', `public, s-maxage=${survive}`);
   ctx.waitUntil(cache.put(cacheKey, toStore));
 
   res.headers.set('X-Edge-Cache', 'MISS');
@@ -268,7 +301,8 @@ export default {
         ctx.waitUntil(fetchAndStore(request, cacheKey, route, cache, ctx, gen));
         return res;
       }
-      // Too stale to serve — fall through and fetch synchronously.
+      // Too old to serve normally — but keep it as outage insurance.
+      return fetchAndStore(request, cacheKey, route, cache, ctx, gen, hit.clone());
     }
 
     return fetchAndStore(request, cacheKey, route, cache, ctx, gen);
