@@ -6,8 +6,9 @@
 
 import { buildRegistry, handle } from './core.js';
 import cdn from './labs/cdn.js';
+import rateLimit from './labs/ratelimit.js';
 
-const registry = buildRegistry([cdn]);
+const registry = buildRegistry([cdn, rateLimit]);
 
 export default {
   fetch: (request, env, ctx) => handle(request, env, ctx, registry),

@@ -5,7 +5,7 @@
  * post becomes wrong, and nothing in a browser would tell us.
  */
 import {
-  fixedWindow, slidingLog, slidingCounter, tokenBucket,
+  fixedWindow, slidingLog, slidingCounter, tokenBucket, distributed,
   steady, burst, boundaryBurst, allowedCount,
 } from '../public/assets/ratelimit.js';
 
@@ -53,6 +53,15 @@ check('a long pause resets the window',
       allowedCount(fixedWindow([0, WINDOW * 5], { limit: 1, windowMs: WINDOW })), 2);
 check('a skipped window does not carry a stale previous count',
       allowedCount(slidingCounter([0, WINDOW * 5], { limit: 1, windowMs: WINDOW })), 2);
+
+console.log('\n— distributed limiters: the fleet multiplies the limit —');
+const flood = steady(200, 300);
+const perN = (n, strategy) => distributed(flood, cfg, { instances: n, strategy }).totalAllowed;
+check('one server enforces the configured limit', perN(1, 'round-robin'), LIMIT);
+check('two servers admit twice it',               perN(2, 'round-robin'), LIMIT * 2);
+check('eight servers admit eight times it',       perN(8, 'round-robin'), LIMIT * 8);
+check('sticky routing restores the true limit',   perN(8, 'sticky'), LIMIT);
+check('random routing also multiplies',           perN(4, 'random') > LIMIT, true);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

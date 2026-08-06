@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saying no properly — rate limiting lab</title>
+<meta name="description" content="A bare 429 is nearly useless. What to send when you refuse, and why a vague refusal makes clients hammer you harder.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/rate-limit/04">← Previous</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">Rate limiting · post 5 of 5</p>
+<h1>Saying no properly</h1>
+<p class="standfirst">Four posts on deciding whether to refuse. This one is about the refusal itself — which is where most implementations quietly become part of the problem.</p>
+
+<p>A client that gets refused has to decide what to do next, and it decides using only what you told it. Send a bare <code>429</code> with an empty body and you have told it nothing. It doesn't know whether to retry in a second or an hour, whether the limit is per-second or per-day, or how much budget it has left.</p>
+
+<p>So it guesses. Usually it retries immediately, because that's the default in most HTTP clients. <strong>A vague refusal converts one blocked client into a client hammering you continuously</strong> — you've spent the effort to reject the request and gained nothing, because it comes straight back.</p>
+
+<h2>Trip it yourself</h2>
+
+<p>This is a real token bucket running at the edge, holding state for you specifically. The first requests pass, the rest are genuinely refused. Nothing breaks and nothing is left in a bad state — waiting a second or two restores your budget.</p>
+
+<div class="lab"
+     data-widget="rl-live"
+     data-rate="1"
+     data-burst="5"
+     data-title="A limiter you can actually trip">
+</div>
+
+<p>Watch the <code>429</code> rows: each carries how many requests you have left and how long to wait. That second number is the difference between a client that behaves and a client that doesn't.</p>
+
+<h2>What belongs in a refusal</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>Header</th><th>Says</th><th>Why it matters</th></tr></thead>
+  <tbody>
+    <tr><td><code>Retry-After</code></td><td>wait this many seconds</td><td>the one that stops retry storms</td></tr>
+    <tr><td><code>X-RateLimit-Limit</code></td><td>your total budget</td><td>lets a client pace itself before being refused</td></tr>
+    <tr><td><code>X-RateLimit-Remaining</code></td><td>what's left</td><td>turns limiting into something clients can plan around</td></tr>
+    <tr><td><code>X-RateLimit-Reset</code></td><td>when it refills</td><td>useful for batch clients scheduling work</td></tr>
+  </tbody>
+</table></div>
+
+<p>Send the last three on <strong>successful</strong> responses too, not just refusals. A client that can see its budget shrinking can slow down before it hits the wall; one that only learns at the moment of rejection cannot.</p>
+
+<div class="note">
+  <span class="tag">Retry-After has to be true</span>
+  <p>If you say one second and the budget actually returns in five, a well-behaved client retries at one second, gets refused again, and now retries four times instead of once. <strong>A dishonest Retry-After creates the exact traffic it was meant to prevent</strong>, and it does so specifically among the clients that were trying to cooperate.</p>
+  <p>The limiter above computes it from the actual token deficit — how long until one whole token exists — rather than a fixed guess. Verified: refused immediately, and allowed after exactly the wait it asked for.</p>
+</div>
+
+<h2>Which status code</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>Code</th><th>Means</th><th>Use when</th></tr></thead>
+  <tbody>
+    <tr><td class="n">429</td><td>too many requests</td><td>they exceeded their limit — almost always this</td></tr>
+    <tr><td class="n">503</td><td>service unavailable</td><td>you are shedding load, not enforcing a quota</td></tr>
+    <tr><td class="n">403</td><td>forbidden</td><td>never for limiting — implies a permissions problem</td></tr>
+  </tbody>
+</table></div>
+
+<p>The 429/503 distinction is worth keeping straight because clients treat them differently. A <code>429</code> says <em>you</em> did too much; a <code>503</code> says <em>we</em> are struggling. Monitoring that conflates them will show a limiter working correctly as though it were an outage.</p>
+
+<h2>The client's half</h2>
+
+<p>Even a perfect refusal fails if clients retry badly. Two things matter, and the second is the one people skip.</p>
+
+<p><strong>Back off exponentially.</strong> Wait 1s, then 2s, 4s, 8s. A client retrying at a fixed interval never lets you recover.</p>
+
+<p><strong>Add jitter.</strong> If a thousand clients are refused at the same moment and all back off by exactly one second, they return as a synchronised wave — and you refuse them all again, one second later, forever. Randomising each delay spreads them out.</p>
+
+<pre><code>delay = base * 2**attempt
+sleep(random(0, delay))     // full jitter</code></pre>
+
+<div class="note">
+  <span class="tag">You have seen this before too</span>
+  <p>In the CDN lab, cached objects were given lifetimes jittered by ±15% so that everything cached during a spike didn't expire together and recreate that spike on a loop.</p>
+  <p>Same problem, opposite end of the wire. <strong>Synchronised clients are the failure mode; randomness is the fix.</strong> Any time many actors react to the same event at the same instant, you need to spread them deliberately.</p>
+</div>
+
+<h2>The five posts in one page</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>Post</th><th>The thing worth keeping</th></tr></thead>
+  <tbody>
+    <tr><td><a href="/rate-limit/01">1</a></td><td>Limiters do four different jobs, and they want opposite behaviour. Decide which yours is.</td></tr>
+    <tr><td><a href="/rate-limit/02">2</a></td><td>Fixed windows admit twice the limit across a boundary. Sliding counters cost two integers and fix it.</td></tr>
+    <tr><td><a href="/rate-limit/03">3</a></td><td>Bursts aren't abuse. Token buckets separate sustained rate from burst tolerance.</td></tr>
+    <tr><td><a href="/rate-limit/04">4</a></td><td>Your limit is multiplied by your server count. Exactness costs a network hop.</td></tr>
+    <tr><td>5</td><td>A refusal that doesn't say when to return causes the traffic it was meant to stop.</td></tr>
+  </tbody>
+</table></div>
+
+<p>The through-line, and it's the same one the CDN lab kept landing on: <strong>the interesting failures are invisible in the obvious metrics.</strong> A fixed window under attack reports that it never exceeded its limit, and it's telling the truth about its own counters. A per-instance limiter reports correct enforcement on all eight servers while the client sails past by eight times. In both cases you have to measure the thing you actually care about, from outside, rather than trusting a component's report about itself.</p>
+
+<div class="postnav">
+  <a href="/rate-limit/04">← Distributed limiters</a>
+  <a href="/">All posts →</a>
+</div>
+
+</div>
+<script type="module" src="/assets/ratelimit-widgets.js"></script>
+</body>
+</html>

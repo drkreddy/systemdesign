@@ -7,7 +7,7 @@
  */
 
 import {
-  ALGORITHMS, compare, allowedCount,
+  ALGORITHMS, compare, allowedCount, distributed,
   steady, burst, boundaryBurst,
 } from './ratelimit.js';
 
@@ -169,7 +169,133 @@ function mountBucket(el) {
   draw();
 }
 
-const MOUNTS = { 'rl-compare': mountCompare, 'rl-bucket': mountBucket };
+function mountDistributed(el) {
+  const limit = Number(el.dataset.limit || 10);
+  const windowSec = Number(el.dataset.window || 60);
+  const windowMs = windowSec * 1000;
+
+  el.innerHTML = `
+    <div class="lab-head">
+      <h4>${el.dataset.title || 'One limit, several servers'}</h4>
+      <label class="ctl">servers <input class="inst" type="range" min="1" max="8" value="4"></label>
+      <label class="ctl">routing
+        <select class="strategy">
+          <option value="round-robin">round robin</option>
+          <option value="random">random</option>
+          <option value="sticky">sticky by client</option>
+        </select>
+      </label>
+    </div>
+    <div class="lab-body"></div>
+    <div class="lab-note"></div>`;
+
+  const body = el.querySelector('.lab-body');
+  const note = el.querySelector('.lab-note');
+  const instEl = el.querySelector('.inst');
+  const stratEl = el.querySelector('.strategy');
+
+  const draw = () => {
+    const instances = Number(instEl.value);
+    const strategy = stratEl.value;
+    // Far more traffic than the limit permits, so the only thing varying is how
+    // many servers get to say yes.
+    const events = steady(120, Math.floor(windowMs / 160));
+    const r = distributed(events, { limit, windowMs }, { instances, strategy });
+    const runs = r.perInstance.map((decisions, i) => ({
+      label: `server ${i + 1}`, decisions, limit,
+    }));
+    body.innerHTML = timelineSvg(runs, { windowMs, maxT: Math.max(...events) });
+    const over = r.totalAllowed > limit;
+    note.innerHTML =
+      `Configured limit: <strong>${limit}</strong> per ${windowSec}s. ` +
+      `Across ${instances} server${instances > 1 ? 's' : ''} the client actually got ` +
+      `<strong style="color:${over ? 'var(--origin)' : 'var(--edge)'}">${r.totalAllowed}</strong>` +
+      (over ? ` — ${(r.totalAllowed / limit).toFixed(0)}x the limit.` : ' — correct.');
+  };
+
+  instEl.addEventListener('input', draw);
+  stratEl.addEventListener('change', draw);
+  draw();
+}
+
+/* The only widget here that touches a server. Everything else is arithmetic;
+ * being genuinely refused is not, so this one fires real requests at a real
+ * limiter and shows the headers that come back. It WILL get you a 429 — that
+ * is the demonstration, not a failure. */
+const PLAY = 'https://play.drkreddy.com';
+
+function visitorId() {
+  const KEY = 'cdn-lab-visitor';
+  let v = null;
+  try { v = localStorage.getItem(KEY); } catch { /* private mode */ }
+  if (!v) {
+    v = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    try { localStorage.setItem(KEY, v); } catch { /* ignore */ }
+  }
+  return v;
+}
+
+function mountLive(el) {
+  const rate = Number(el.dataset.rate || 1);
+  const bucket = Number(el.dataset.burst || 5);
+  el.innerHTML = `
+    <div class="lab-head">
+      <h4>${el.dataset.title || 'A limiter you can actually trip'}</h4>
+      <button class="run" type="button">Send 8 requests</button>
+    </div>
+    <div class="lab-body"><p style="font-size:.9rem;color:var(--ink-2);margin:0">
+      Bucket of ${bucket}, refilling at ${rate}/second. The first few will pass and
+      the rest will be refused with a real <code>429</code>. Nothing breaks — waiting
+      a second or two restores your budget.</p></div>
+    <div class="lab-note"></div>`;
+
+  const body = el.querySelector('.lab-body');
+  const note = el.querySelector('.lab-note');
+  const btn = el.querySelector('.run');
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Sending…';
+    body.innerHTML = '<div class="rows"></div>';
+    const rows = body.querySelector('.rows');
+    let allowed = 0, refused = 0, lastRetry = null;
+
+    for (let i = 1; i <= 8; i++) {
+      let res;
+      try {
+        res = await fetch(`${PLAY}/rate-limit/token-bucket?rate=${rate}&burst=${bucket}&v=${visitorId()}`,
+                          { mode: 'cors', cache: 'no-store' });
+      } catch {
+        note.textContent = 'Could not reach the limiter. The algorithms above still work — they run here.';
+        break;
+      }
+      const ok = res.status === 200;
+      ok ? allowed++ : refused++;
+      const remaining = res.headers.get('x-ratelimit-remaining');
+      const retry = res.headers.get('retry-after');
+      if (retry) lastRetry = retry;
+      rows.insertAdjacentHTML('beforeend', `
+        <div class="r">
+          <span class="idx">${i}</span>
+          <span><span class="chip ${ok ? 'hit' : 'miss'}">${res.status}</span></span>
+          <span style="font-size:.78rem;color:var(--ink-2)">
+            ${remaining !== null ? `${remaining} left` : ''}${retry ? ` · retry after ${retry}s` : ''}</span>
+          <span class="ms"></span>
+        </div>`);
+    }
+
+    note.innerHTML = `<strong>${allowed}</strong> allowed, <strong>${refused}</strong> refused.` +
+      (lastRetry ? ` The server asked you to wait <strong>${lastRetry}s</strong> — and it means it.
+       Wait that long and the next request succeeds.` : '');
+    btn.disabled = false; btn.textContent = 'Send 8 requests';
+  });
+}
+
+const MOUNTS = {
+  'rl-compare': mountCompare,
+  'rl-bucket': mountBucket,
+  'rl-distributed': mountDistributed,
+  'rl-live': mountLive,
+};
 
 document.querySelectorAll('.lab[data-widget^="rl-"]').forEach((el) => {
   const fn = MOUNTS[el.dataset.widget];

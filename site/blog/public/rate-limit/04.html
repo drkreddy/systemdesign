@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your limit is multiplied by your server count — rate limiting lab</title>
+<meta name="description" content="Eight servers turn a limit of 10 into a limit of 80. Why exact global limiting is expensive, and what real systems do instead.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/rate-limit/03">← Previous</a>
+  <a href="/rate-limit/05">Next: saying no properly →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">Rate limiting · post 4 of 5</p>
+<h1>Your limit is multiplied by your server count</h1>
+<p class="standfirst">Everything so far assumed one limiter holding one set of counters. That assumption survives exactly as long as you run one server.</p>
+
+<p>Put the same code on eight servers behind a load balancer and each one counts in its own memory. Each faithfully enforces "10 per minute". The client, whose requests are spread across all eight, gets eighty.</p>
+
+<p>Nothing is broken. Every instance is doing exactly what you told it. The limit you configured simply isn't the limit anyone experiences.</p>
+
+<div class="lab"
+     data-widget="rl-distributed"
+     data-limit="10"
+     data-window="60"
+     data-title="One client, one limit, several servers">
+</div>
+
+<p class="legend">
+  <span><i class="ok"></i> allowed</span>
+  <span><i class="no"></i> refused</span>
+</p>
+
+<p>Drag the server count and watch the total. The effective limit is <strong>servers × configured limit</strong>, and it changes every time you scale — which means your rate limit silently loosens under exactly the traffic that made you add capacity.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Servers</th><th>Configured</th><th>Actually allowed</th></tr></thead>
+  <tbody>
+    <tr><td class="n">1</td><td class="n">10</td><td class="n">10</td></tr>
+    <tr><td class="n">2</td><td class="n">10</td><td class="n">20</td></tr>
+    <tr><td class="n">4</td><td class="n">10</td><td class="n">40</td></tr>
+    <tr><td class="n">8</td><td class="n">10</td><td class="n" style="color:var(--origin)"><strong>80</strong></td></tr>
+  </tbody>
+</table></div>
+
+<div class="note">
+  <span class="tag">You have already seen this shape</span>
+  <p>In the CDN lab, warming the cache in Singapore did nothing for Tokyo, because each location caches independently — one object cost nine origin fetches across ten cities.</p>
+  <p>This is the same fact wearing different clothes. <strong>State that lives per-instance behaves per-instance</strong>, whether it's a cached page or a request counter. Anything you want to be globally true has to be stored somewhere global, and that costs a network hop.</p>
+</div>
+
+<h2>Fix 1: divide the limit by the server count</h2>
+
+<p>The arithmetic is obvious — eight servers, so give each a limit of 1.25. It fails for three separate reasons, any one of which is enough.</p>
+
+<p><strong>Traffic isn't evenly spread.</strong> Round robin approximates it; least-connections doesn't; a client with keep-alive connections may land on one server for minutes. Switch the widget's routing to <em>random</em> and watch the per-server counts diverge. Whichever server happens to be busiest starts refusing legitimate traffic while others sit idle with unused budget.</p>
+
+<p><strong>The divisor changes without warning.</strong> Autoscaling adds an instance and every limit is now wrong until something recomputes them. Deploys, restarts, and failed health checks all move the number.</p>
+
+<p><strong>It rounds badly.</strong> A limit of 10 across 8 servers is 1.25 each. Round down and the real limit is 8; round up and it's 16. Small limits — exactly the ones used for expensive operations like login or password reset — suffer most.</p>
+
+<h2>Fix 2: route each client to one server</h2>
+
+<p>If every request from a client always reaches the same instance, per-instance counting <em>is</em> per-client counting, and the arithmetic is correct again. Set the widget's routing to <strong>sticky by client</strong> — the total drops back to exactly 10.</p>
+
+<p>This genuinely works and it is genuinely used. It costs you two things.</p>
+
+<p>The limiter becomes <strong>coupled to your routing layer</strong>. Rate limiting now depends on consistent hashing by client id, so it can only be as correct as that routing is.</p>
+
+<p>And <strong>rebalancing resets counters</strong>. Add or remove a server and some clients move to an instance that has never heard of them, arriving with a fresh budget. During a deploy — when your fleet is least able to absorb it — a portion of clients get their limits reset. That's tolerable for fairness limiting and unacceptable for abuse limiting, which is precisely when an attacker is watching for it.</p>
+
+<h2>Fix 3: one shared counter</h2>
+
+<p>Put the counter in Redis. Every instance increments the same key, so the limit is exactly right regardless of fleet size or routing.</p>
+
+<pre><code>count = INCR key
+if count == 1: EXPIRE key window
+if count &gt; limit: refuse</code></pre>
+
+<p>Correct, simple, and it makes your rate limiter a <strong>distributed system with a hard dependency on the request path</strong>. Every request now costs a network round trip before you know whether to serve it. Under load that's the moment Redis becomes your bottleneck — and if it's unreachable you must choose, in advance, between failing open (no limiting during an incident, exactly when you need it) and failing closed (a Redis blip becomes a total outage).</p>
+
+<p>That choice deserves a deliberate answer rather than a default. Most teams fail open for fairness limiting and closed for abuse limiting, which is a reasonable split, but only if someone decided it.</p>
+
+<h2>What production systems mostly do</h2>
+
+<p>Approximate, on purpose.</p>
+
+<p>Each instance keeps a local counter and enforces immediately with no network call. Periodically — every second or so — instances share their counts through a shared store or gossip, and each adjusts its local budget based on what the fleet has spent. Between syncs the limit is slightly wrong; over any window that matters, it is close.</p>
+
+<p>You trade exactness for the request path staying fast and staying up. Given that a limit of "100 per minute" was itself a rough guess, defending its last few units with a synchronous dependency on the hot path is usually the wrong trade.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Approach</th><th>Exact?</th><th>Cost</th><th>Fits</th></tr></thead>
+  <tbody>
+    <tr><td>Per-instance, ignore it</td><td>no — N×</td><td>none</td><td>coarse protection, known fleet size</td></tr>
+    <tr><td>Divide by fleet size</td><td>no, and unfair</td><td>fragile under scaling</td><td>rarely worth it</td></tr>
+    <tr><td>Sticky routing</td><td>yes, until rebalance</td><td>couples to routing</td><td>per-client limits, stable fleets</td></tr>
+    <tr><td>Shared store</td><td>yes</td><td>a hop on every request</td><td>billing, abuse, small volumes</td></tr>
+    <tr><td>Local + periodic sync</td><td>close</td><td>complexity</td><td>most large systems</td></tr>
+  </tbody>
+</table></div>
+
+<div class="note">
+  <span class="tag">The honest summary</span>
+  <p>There is no free exact distributed rate limiter. Every option trades exactness, latency, or a dependency — and the right answer depends on which of the four jobs from post 1 you're actually doing. A billing limiter should pay for a shared store. A capacity limiter should not.</p>
+</div>
+
+<p>The last post is about what to send when you do refuse. It turns out a bare <code>429</code> is close to useless, and the difference between a good refusal and a bad one decides whether clients back off or start hammering you harder.</p>
+
+<div class="postnav">
+  <a href="/rate-limit/03">← Token bucket</a>
+  <a href="/rate-limit/05">Next: saying no properly →</a>
+</div>
+
+</div>
+<script type="module" src="/assets/ratelimit-widgets.js"></script>
+</body>
+</html>

@@ -23,7 +23,10 @@ const isLocalDev = (origin) => /^http:\/\/localhost:\d+$/.test(origin || '');
 const EXPOSED = [
   'x-play-cache', 'x-play-age', 'x-play-experiment', 'x-play-live',
   'cf-cache-status', 'cf-ray', 'age', 'x-origin-hit', 'x-origin-region',
+  'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset',
 ].join(', ');
+
+import { HANDLERS } from './handlers.js';
 
 const KILL_MEMO_MS = 10_000;
 let killMemo = { value: null, at: 0 };
@@ -40,11 +43,29 @@ export function defineLab(name, experiments) {
   for (const [key, def] of Object.entries(experiments)) {
     const where = `${name}/${key}`;
     if (!/^[a-z][a-z0-9-]*$/.test(key)) throw new Error(`${where}: bad experiment name`);
-    if (typeof def.origin !== 'string' || !def.origin.startsWith('/')) {
-      throw new Error(`${where}: origin must be an absolute path`);
+    const kind = def.kind || 'proxy';
+    if (kind !== 'proxy' && kind !== 'local') {
+      throw new Error(`${where}: kind must be 'proxy' or 'local', got '${kind}'`);
     }
-    if (!Number.isFinite(def.ttl) || !Number.isFinite(def.swr)) {
-      throw new Error(`${where}: must declare numeric ttl and swr`);
+    if (kind === 'proxy') {
+      if (typeof def.origin !== 'string' || !def.origin.startsWith('/')) {
+        throw new Error(`${where}: origin must be an absolute path`);
+      }
+      if (!Number.isFinite(def.ttl) || !Number.isFinite(def.swr)) {
+        throw new Error(`${where}: must declare numeric ttl and swr`);
+      }
+    } else {
+      // A local experiment answers from the Worker, so an origin path would be
+      // silently ignored — better to reject it than to let a lab believe it
+      // configured something.
+      if (def.origin !== undefined) {
+        throw new Error(`${where}: a local experiment must not declare an origin`);
+      }
+      // The handler is looked up in a map owned by the platform. A lab names
+      // one; it cannot supply one, so a lab file stays free of executable code.
+      if (typeof def.handler !== 'string' || !HANDLERS[def.handler]) {
+        throw new Error(`${where}: handler must name one of: ${Object.keys(HANDLERS).join(', ')}`);
+      }
     }
     for (const [p, spec] of Object.entries(def.params || {})) {
       if (spec.type === 'int') {
@@ -193,6 +214,18 @@ export async function handle(request, env, ctx, registry) {
       live: false,
       reason: 'live experiments are temporarily disabled; the page should show recorded data',
     }, 503, request, { 'X-Play-Live': 'off' });
+  }
+
+  if ((def.kind || 'proxy') === 'local') {
+    const res = await HANDLERS[def.handler]({
+      params, visitor: visitorId(url), cache: caches.default, env, request,
+    });
+    const out = new Response(res.body, res);
+    for (const [k, v] of Object.entries(corsHeaders(request))) out.headers.set(k, v);
+    out.headers.set('X-Play-Experiment', `${lab.name}/${experimentName}`);
+    out.headers.set('X-Play-Live', 'on');
+    if (notes.length) out.headers.set('X-Play-Clamped', JSON.stringify(notes));
+    return out;
   }
 
   return serve(request, env, ctx, { lab, experimentName, def, params, notes, url });

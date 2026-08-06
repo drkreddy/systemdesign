@@ -145,3 +145,44 @@ export function compare(events, config, keys = Object.keys(ALGORITHMS)) {
 }
 
 export const allowedCount = (decisions) => decisions.filter((d) => d.allowed).length;
+
+/* ------------------------------------------------- distributed limiters */
+
+/**
+ * Deterministic pseudo-random, so "random" load balancing produces the same
+ * picture on every page load. A widget that reshuffles on refresh makes readers
+ * doubt the result rather than the design.
+ */
+function lcg(i) {
+  let x = (i * 1103515245 + 12345) & 0x7fffffff;
+  x ^= x >>> 7;
+  return x & 0x7fffffff;
+}
+
+/** Splits one client's requests across N instances. */
+export function spread(events, { instances, strategy = 'round-robin' }) {
+  const buckets = Array.from({ length: instances }, () => []);
+  events.forEach((t, i) => {
+    let idx;
+    if (strategy === 'sticky') idx = 0;              // routed by client id
+    else if (strategy === 'random') idx = lcg(i) % instances;
+    else idx = i % instances;
+    buckets[idx].push(t);
+  });
+  return buckets;
+}
+
+/**
+ * Runs an independent limiter on every instance, exactly as a fleet does when
+ * each server counts in its own memory. The aggregate is what the client
+ * actually experiences — and it is not the limit you configured.
+ */
+export function distributed(events, config, { instances, strategy = 'round-robin', algorithm = 'sliding-counter' }) {
+  const buckets = spread(events, { instances, strategy });
+  const perInstance = buckets.map((b) => ALGORITHMS[algorithm].fn(b, config));
+  return {
+    perInstance,
+    totalAllowed: perInstance.reduce((a, d) => a + allowedCount(d), 0),
+    totalSent: events.length,
+  };
+}

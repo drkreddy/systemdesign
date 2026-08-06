@@ -59,7 +59,7 @@
   </a>
 </div>
 
-<h2>Rate limiting <span style="font-weight:400;color:var(--ink-3);font-size:.7em">3 of 5 posts</span></h2>
+<h2>Rate limiting <span style="font-weight:400;color:var(--ink-3);font-size:.7em">5 posts</span></h2>
 <p>Every limiter answers one question — has this client had too many? — and the obvious way to answer it lets a client take twice its limit without breaking a rule. These posts simulate the algorithms side by side, in your browser, with no network involved.</p>
 
 <div class="cards">
@@ -77,6 +77,16 @@
     <span class="n">03</span>
     <h3>Token bucket: allowing bursts on purpose</h3>
     <p>Real clients are bursty. Separating sustained rate from burst tolerance.</p>
+  </a>
+  <a class="card" href="/rate-limit/04">
+    <span class="n">04</span>
+    <h3>Your limit is multiplied by your server count</h3>
+    <p>Eight servers turn a limit of 10 into a limit of 80. What exactness costs.</p>
+  </a>
+  <a class="card" href="/rate-limit/05">
+    <span class="n">05</span>
+    <h3>Saying no properly</h3>
+    <p>A bare 429 causes the traffic it was meant to stop. Trip a real limiter yourself.</p>
   </a>
 </div>
 
