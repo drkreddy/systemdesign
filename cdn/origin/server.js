@@ -18,6 +18,7 @@ const INSTANCE = (process.env.RENDER_INSTANCE_ID || process.env.FLY_MACHINE_ID |
 // ---------------------------------------------------------------------------
 const hits = new Map();            // path -> total requests that reached origin
 let inflight = 0;                  // requests being served right now
+let forcedFailure = null;          // when set, /api/flaky returns this status
 let maxInflight = 0;               // high-water mark — the thundering-herd signal
 const recent = [];                 // ring buffer of the last 500 requests
 const BOOTED_AT = Date.now();
@@ -172,15 +173,26 @@ async function route(req, res, { path, q }) {
     }, { 'Cache-Control': cacheControl(q), 'X-Origin-Hit': String(n) });
   }
 
-  // Fails on demand, so edge resilience can be tested without taking the real
-  // origin down. ?status= chooses the failure code; ?ms= delays it first, to
-  // imitate an origin that is struggling rather than cleanly dead.
+  // Breaks the origin on demand, so edge resilience can be tested without
+  // taking the real thing down. The failure is toggled by a SEPARATE endpoint
+  // rather than chosen by query string, because a URL that always fails cannot
+  // reproduce the case that matters: one that was healthy, got cached, and only
+  // then started failing.
+  if (path === '/api/toggle') {
+    forcedFailure = q.has('clear') ? null : clamp(q.get('status'), 400, 599, 500);
+    return json(res, 200, { forced_failure: forcedFailure }, { 'Cache-Control': 'no-store' });
+  }
+
   if (path === '/api/flaky') {
     const n = record(path);
-    const status = clamp(q.get('status'), 400, 599, 500);
     await sleep(clamp(q.get('ms'), 0, 20000, 0));
-    return json(res, status, {
-      failed_on_purpose: true, status, origin_hit: n, at: new Date().toISOString(),
+    if (forcedFailure) {
+      return json(res, forcedFailure, {
+        failing: true, status: forcedFailure, origin_hit: n, at: new Date().toISOString(),
+      }, { 'Cache-Control': 'no-store', 'X-Origin-Hit': String(n) });
+    }
+    return json(res, 200, {
+      healthy: true, origin_hit: n, at: new Date().toISOString(),
     }, { 'Cache-Control': cacheControl(q), 'X-Origin-Hit': String(n) });
   }
 
