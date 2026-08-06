@@ -52,18 +52,6 @@ const ROUTES = [
     immutable: true,
   },
   {
-    // Deliberately tiny windows so outage behaviour can be exercised in seconds
-    // rather than minutes. Matched before api-dynamic, which would otherwise
-    // claim this path.
-    name: 'resilience-test',
-    tag: 'api',
-    test: (p) => p === '/api/flaky',
-    cache: true,
-    edgeTtl: 5,
-    browserTtl: 0,
-    swr: 5,
-  },
-  {
     name: 'api-dynamic',
     tag: 'api',
     test: (p) => p.startsWith('/api/'),
@@ -239,6 +227,24 @@ async function fetchAndStore(request, cacheKey, route, cache, ctx, gen, staleFal
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // This host is the UNHARDENED lab: no parameter caps, no rate limiting, and
+    // endpoints that exist to be poked at with tools. It was safe only while
+    // nobody knew about it, which stopped being true the moment the work became
+    // public. play.drkreddy.com is the public surface now; this one is private.
+    //
+    // Fails CLOSED: an unset LAB_TOKEN denies everyone rather than admitting
+    // everyone, because an unset variable in production must never mean "no lock".
+    const labToken = request.headers.get('X-Lab-Token') || url.searchParams.get('lab_token');
+    if (!env.LAB_TOKEN || labToken !== env.LAB_TOKEN) {
+      return new Response(JSON.stringify({
+        error: 'this lab is private',
+        public_surface: 'https://play.drkreddy.com',
+      }, null, 2), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      });
+    }
 
     // Tag invalidation endpoint. Authenticated, because an open purge endpoint
     // is a denial-of-service vector: anyone could orphan the cache in a loop and

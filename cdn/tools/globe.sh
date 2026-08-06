@@ -17,6 +17,11 @@ MODE="${1:?usage: globe.sh <http|ping> <target> [label]}"
 TARGET="${2:?usage: globe.sh <http|ping> <target> [label]}"
 LABEL="${3:-$MODE-$(date +%H%M%S)}"
 API=https://api.globalping.io/v1/measurements
+
+# cdn-lab is private; probes must authenticate or every measurement returns 401.
+if [ -f "$(dirname "$0")/../.env" ]; then
+  set -a; . "$(dirname "$0")/../.env"; set +a
+fi
 OUTDIR="$(dirname "$0")/../results"; mkdir -p "$OUTDIR"
 
 # Ten locations spread across the globe, weighted toward Asia because that is
@@ -31,9 +36,11 @@ if [ "$MODE" = http ]; then
   rest=${TARGET#*://}; host=${rest%%/*}; path="/${rest#*/}"
   [ "$rest" = "$host" ] && path="/"
   body=$(jq -nc --arg h "$host" --arg p "$path" --arg pr "$(echo "$proto" | tr a-z A-Z)" \
-    --argjson loc "$LOCATIONS" '{
+    --arg tok "${LAB_TOKEN:-}" --argjson loc "$LOCATIONS" '{
       type:"http", target:$h, limit:10, locations:$loc,
-      measurementOptions:{ protocol:$pr, request:{ path:$p, method:"GET" } } }')
+      measurementOptions:{ protocol:$pr, request:{
+        path:$p, method:"GET",
+        headers: (if $tok == "" then {} else {"X-Lab-Token": $tok} end) } } }')
 else
   body=$(jq -nc --arg t "$TARGET" --argjson loc "$LOCATIONS" \
     '{type:"ping", target:$t, limit:10, locations:$loc, measurementOptions:{packets:6}}')

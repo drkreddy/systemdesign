@@ -994,6 +994,61 @@ it cannot pollute the counters the experiments read.
 
 ---
 
+## cdn-lab.drkreddy.com is now private
+
+The lab host has no parameter caps and no rate limiting — it exists to be poked
+at with tools. That was safe only while nobody knew about it, which stopped being
+true once the work went public. `play.drkreddy.com` is the public surface; this
+one now requires a token.
+
+    X-Lab-Token: <LAB_TOKEN>        or  ?lab_token=<LAB_TOKEN>
+
+**Fails closed:** an unset `LAB_TOKEN` denies everyone rather than admitting
+everyone. An unset variable in production must never mean "no lock".
+
+Verified stable across three rounds: anonymous 401, wrong token 401, correct
+token 200. `/api/slow?ms=3000` on the lab host is 401 anonymously.
+
+The three surfaces now:
+
+| Host | Access | Purpose |
+|---|---|---|
+| `play.drkreddy.com` | public, capped, rate limited | blog widgets |
+| `cdn-lab.drkreddy.com` | token required | your tooling |
+| `drkreddy.com` | untouched, still 301s | live site |
+
+`tools/probe.sh` and `tools/globe.sh` now load `.env` and send the token
+automatically — Globalping passes it through `measurementOptions.request.headers`,
+without which every probe would measure a 401.
+
+`tools/keepalive.sh` is deleted. The cron trigger on `play` does the job and
+survives the terminal closing.
+
+### Rate limiting, tuned
+
+Free plan offers only a 10-second period, so the request count is the only lever.
+An initial 10/10s blocked at request 11 — correct behaviour, but too tight for
+the blog, since the stampede widget alone fires 10 concurrent. Raised to 50/10s:
+60 sequential requests pass, and 10 concurrent all return 200.
+
+The rate limit is not what protects the origin — the caps, coalescing and
+per-visitor keys do that. Its job is stopping a sustained scripted flood.
+
+### Two failures worth remembering
+
+**A secret written to `.env` silently vanished.** The file was open in an editor;
+a save from a buffer loaded before the write clobbered it. Cloudflare held a
+secret that no longer existed locally, and the symptom was an authorised caller
+getting 401. Write-then-read-back and compare, rather than trusting that the
+append succeeded.
+
+**Secret propagation is not instant.** 30 seconds after `wrangler secret put`,
+some isolates still had the old value, so the same token authenticated through a
+query parameter and failed through a header seconds apart. It was propagation
+lag, not a header-parsing bug — worth ruling out before debugging the code.
+
+---
+
 <!-- KEEP THIS LAST. New module notes go ABOVE this marker. -->
 
 ## Status

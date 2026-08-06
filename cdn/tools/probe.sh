@@ -17,6 +17,14 @@
 # our own X-Origin-Hit counter.
 set -uo pipefail
 
+# cdn-lab.drkreddy.com is private. Load the token so the lab tooling keeps
+# working; requests without it get 401.
+if [ -f "$(dirname "$0")/../.env" ]; then
+  set -a; . "$(dirname "$0")/../.env"; set +a
+fi
+AUTH=()
+[ -n "${LAB_TOKEN:-}" ] && AUTH=(-H "X-Lab-Token: $LAB_TOKEN")
+
 URL="${1:?usage: probe.sh <url> [count] [curl-args...]}"
 COUNT="${2:-5}"
 shift 2 2>/dev/null || shift 1
@@ -32,7 +40,7 @@ for i in $(seq 1 "$COUNT"); do
   # the same content negotiation a browser would.
   t=$(curl -sS -o /dev/null -D "$HDR" --compressed \
         -w '%{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total} %{http_code} %{size_download}' \
-        "$URL" "$@" 2>/dev/null) || { printf '%-3s request failed\n' "$i"; continue; }
+        "${AUTH[@]}" "$URL" "$@" 2>/dev/null) || { printf '%-3s request failed\n' "$i"; continue; }
 
   read -r t_dns t_conn t_ssl t_start t_total code size <<<"$t"
 
