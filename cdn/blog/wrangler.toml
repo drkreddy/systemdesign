@@ -7,7 +7,12 @@
 #
 # The site lives in public/ rather than beside this file so that wrangler.toml
 # itself is never served as part of the site.
-name = "blog-drkreddy"
+# Named after the repository, not the site, because Workers Builds derives the
+# Worker name from the connected repo and overrides anything else — it would
+# otherwise warn on every build and open a pull request to "fix" this file.
+# Auto-deploy on push was judged worth more than a tidier name. Changing it
+# later means recreating the build project.
+name = "systemdesign"
 compatibility_date = "2026-08-01"
 
 [assets]
