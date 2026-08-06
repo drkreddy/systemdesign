@@ -1,0 +1,25 @@
+name = "play-drkreddy"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Public surface. Deliberately NOT cdn-lab.drkreddy.com — that host stays
+# private and unhardened, and the two names must never be confusable in a
+# config file or a copied curl command.
+[[routes]]
+pattern = "play.drkreddy.com/*"
+zone_name = "drkreddy.com"
+
+[vars]
+ORIGIN_BASE = "https://cdn-lab-origin.onrender.com"
+
+# Holds only the kill switch (play:enabled = "off"). Read once per isolate per
+# 10s, never written per request — KV's free tier allows 1,000 writes/day, so a
+# per-request counter would exhaust it before lunch. Rate limiting is done with
+# a Cloudflare Rate Limiting Rule instead.
+[[kv_namespaces]]
+binding = "PLAY_META"
+id = "PLACEHOLDER_SET_BY_WRANGLER_KV_CREATE"
+
+# Replaces tools/keepalive.sh, which only ran while a terminal was open.
+[triggers]
+crons = ["*/10 * * * *"]

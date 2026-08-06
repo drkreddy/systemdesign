@@ -21,3 +21,9 @@ services:
     envVars:
       - key: ORIGIN_REGION
         value: oregon
+      # Gates the endpoints that change shared state (/stats/reset, /api/toggle).
+      # sync: false means the value is set in the Render dashboard and never
+      # committed — this repository is public. If it is left unset those
+      # endpoints stay disabled, which is the safe failure direction.
+      - key: ORIGIN_SECRET
+        sync: false

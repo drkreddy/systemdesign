@@ -119,6 +119,23 @@ async function route(req, res, { path, q }) {
     }, { 'Cache-Control': 'no-store' });
   }
 
+  // Mutating endpoints are gated. The origin hostname is published in a public
+  // repository, so anything that changes shared state must be authenticated —
+  // otherwise a stranger can break every reader's experiment. Fails CLOSED: if
+  // ORIGIN_SECRET is unset these endpoints are disabled entirely rather than
+  // open, because an unset variable in production must not mean "no lock".
+  const mutating = path === '/stats/reset' || path === '/api/toggle';
+  if (mutating) {
+    const secret = process.env.ORIGIN_SECRET;
+    const given = req.headers['x-play-secret'] || q.get('secret');
+    if (!secret || given !== secret) {
+      return json(res, 403, {
+        error: 'this endpoint changes shared state and requires a secret',
+        configured: Boolean(secret),
+      }, { 'Cache-Control': 'no-store' });
+    }
+  }
+
   if (path === '/stats/reset') {
     hits.clear();
     recent.length = 0;
@@ -161,7 +178,7 @@ async function route(req, res, { path, q }) {
   // A slow, expensive endpoint — the one worth caching, and the one that hurts
   // when a stampede lands on it. ?ms= controls the pain.
   if (path === '/api/slow') {
-    const ms = clamp(q.get('ms'), 0, 20000, 2000);
+    const ms = clamp(q.get('ms'), 0, 3000, 2000);   // was 20000: unsafe once public
     const n = record(path);
     await sleep(ms);
     return json(res, 200, {
@@ -185,7 +202,7 @@ async function route(req, res, { path, q }) {
 
   if (path === '/api/flaky') {
     const n = record(path);
-    await sleep(clamp(q.get('ms'), 0, 20000, 0));
+    await sleep(clamp(q.get('ms'), 0, 3000, 0));
     if (forcedFailure) {
       return json(res, forcedFailure, {
         failing: true, status: forcedFailure, origin_hit: n, at: new Date().toISOString(),
@@ -264,7 +281,7 @@ async function route(req, res, { path, q }) {
   // cached forever and "invalidated" by changing the URL rather than purging.
   if (path.startsWith('/static/')) {
     const n = record('/static/*');
-    const kb = clamp(q.get('kb'), 1, 5000, 64);
+    const kb = clamp(q.get('kb'), 1, 256, 64);     // was 5000: bandwidth amplifier
     const body = ('/* cdn-lab asset ' + path + ' */\n' + 'x'.repeat(1024).concat('\n')).repeat(kb);
     return send(res, 200, body, {
       'Content-Type': path.endsWith('.css') ? 'text/css' : 'application/javascript',
@@ -278,7 +295,7 @@ async function route(req, res, { path, q }) {
   // Large payload for bandwidth, compression and transfer-time experiments.
   if (path === '/bigpage') {
     const n = record(path);
-    const kb = clamp(q.get('kb'), 1, 10000, 512);
+    const kb = clamp(q.get('kb'), 1, 512, 512);    // was 10000: 10MB per request
     const chunk = 'The quick brown fox jumps over the lazy dog. '.repeat(23); // ~1KB
     return send(res, 200, `<!doctype html><title>bigpage</title><pre>${chunk.repeat(kb)}</pre>`, {
       'Content-Type': 'text/html; charset=utf-8',
