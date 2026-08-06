@@ -909,6 +909,91 @@ are long stale windows and never purging when a version bump would do.
 
 ---
 
+## play.drkreddy.com — public experiment surface
+
+Hardened Worker at `play-worker/`, serving the blog's live widgets. Structure:
+`src/core.js` owns everything security-related; `src/labs/*.js` are data.
+
+    play.drkreddy.com/<lab>/<experiment>?<capped params>&v=<visitor id>
+
+One hostname with paths per lab, because the free plan allows **one Rate Limiting
+Rule** — a single host means one rule covers every lab ever added.
+
+### Why the schema is validated at load
+
+`defineLab()` throws unless every int parameter declares `min` and `max`. An
+uncapped parameter reaching a 0.1-CPU origin is the failure being prevented, so
+it must fail at deploy rather than at 3am. Verified rejected:
+
+    param missing max / missing min / max < min
+    unsupported param type
+    enum with no values
+    origin that is an absolute URL   <- also closes an SSRF path
+    missing ttl / swr
+
+### Verified in production, before anything public existed
+
+| Check | Result |
+|---|---|
+| unregistered lab, experiment, or extra path segment | 404 |
+| `/api/toggle`, `/stats/reset`, `/bigpage` | 404 — no route exists |
+| `ms=999999` | clamped to 1500; origin confirms it computed 1500 |
+| `ms=-99` | clamped to 0 |
+| `utm_source=<script>` | rejected, falls back to default |
+| CORS | exposes `x-play-cache`, `cf-cache-status`, `x-origin-hit`, … |
+| two visitors, same experiment | independent MISS→HIT; neither disturbs the other |
+| `ms=99999` vs `ms=1500` | same cache entry — varying past the cap cannot multiply entries |
+| **100 concurrent, 100 distinct visitors** | 100 × 200 in 3s; **2 origin hits**; `max_inflight` 2 |
+| kill switch on | 503 + `x-play-live: off`, **0 origin hits** |
+
+**Sandboxing is free at the origin.** The visitor id is part of the cache key but
+not the origin URL, so 100 readers get 100 independent MISS→HIT sequences while
+the origin sees one shared request that Cloudflare coalesces.
+
+### Kill switch
+
+    wrangler kv key put --binding PLAY_META play:enabled off --remote   # disable
+    wrangler kv key put --binding PLAY_META play:enabled on  --remote   # restore
+
+Takes up to ~60s to propagate in either direction — measured 40s to restore. KV
+is read once per isolate per 10s, never written per request, because the free
+tier allows only 1,000 writes/day.
+
+### Origin hardening that came with this
+
+The origin hostname is published in a public repository, so `/api/toggle` and
+`/stats/reset` were reachable by anyone — a stranger could break every reader's
+experiment without touching `play`. Both now require `X-Play-Secret` and **fail
+closed**: an unset `ORIGIN_SECRET` disables them rather than leaving them open.
+
+Caps also dropped from private-lab values to public-safe ones:
+
+    /api/slow   ms   20000 -> 3000
+    /bigpage    kb   10000 -> 512
+    /static     kb    5000 -> 256
+
+`play` clamps far lower still; these are the second layer.
+
+### Cold starts
+
+The cron trigger (`*/10 * * * *`) pings `/health`, replacing `tools/keepalive.sh`
+which only ran while a terminal was open. `/health` is excluded from `/stats`, so
+it cannot pollute the counters the experiments read.
+
+### Gotchas
+
+- Worker routes need a DNS record even though nothing routes there. Use
+  `AAAA <name> 100::` **proxied** — the discard address.
+- Cron registration needs a `workers.dev` subdomain to exist on the account.
+  Opening Workers & Pages once creates it.
+- macOS caches negative DNS answers, so `curl` can fail on a new hostname while
+  `dig` succeeds. Work around it with
+  `curl --resolve host:443:$(dig +short host @1.1.1.1 | head -1)`.
+- The Bash tool runs zsh, which does **not** word-split unquoted variables —
+  `$CURL_OPTS` arrives as one argument. Inline the flags instead.
+
+---
+
 <!-- KEEP THIS LAST. New module notes go ABOVE this marker. -->
 
 ## Status
