@@ -1,5 +1,5 @@
 # Lives at the repository root because that is the only place Render looks for a
-# Blueprint — it cannot be nested under cdn/ even though that is where the
+# Blueprint — it cannot be nested under labs/cdn/ even though that is where the
 # project it describes actually lives.
 #
 # Origin is placed in Oregon on purpose. Measuring from India, that is roughly
@@ -11,12 +11,12 @@ services:
     runtime: node
     plan: free
     region: oregon
-    rootDir: cdn/origin
+    rootDir: labs/cdn/origin
     buildCommand: npm install
     startCommand: node server.js
     # Render's own health checks also double as a partial keepalive, though on
     # the free plan the service still idles out after ~15 minutes without
-    # external traffic. See tools/keepalive.sh before running any experiment.
+    # external traffic. A cron trigger on the play worker keeps it awake.
     healthCheckPath: /health
     envVars:
       - key: ORIGIN_REGION
