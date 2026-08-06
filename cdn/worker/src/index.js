@@ -52,6 +52,18 @@ const ROUTES = [
     immutable: true,
   },
   {
+    // Deliberately tiny windows so outage behaviour can be exercised in seconds
+    // rather than minutes. Matched before api-dynamic, which would otherwise
+    // claim this path.
+    name: 'resilience-test',
+    tag: 'api',
+    test: (p) => p === '/api/flaky',
+    cache: true,
+    edgeTtl: 5,
+    browserTtl: 0,
+    swr: 5,
+  },
+  {
     name: 'api-dynamic',
     tag: 'api',
     test: (p) => p.startsWith('/api/'),

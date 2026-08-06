@@ -815,6 +815,100 @@ thundering herd, and Module 6 makes it far worse on purpose before fixing it.
 
 ---
 
+## Module 6 — the thundering herd
+
+### Cloudflare already coalesces, per colo
+
+60 requests fired simultaneously at one cold, slow (3000ms) URL:
+
+    edge:   60 x MISS
+    origin: 2 requests, max_inflight 2
+
+Cloudflare recognises identical in-flight subrequests and collapses them. This
+protection is free and automatic, and contradicts the usual "N misses means N
+origin requests" framing. It is **per colo**, so it does nothing about ten cities
+missing at once — measured separately in Module 5 as nine independent fetches.
+
+### Coalescing protects the origin; SWR protects the user
+
+Same 40-request burst, same URL, only the arrival time differs:
+
+| Load arrives | Cache status | Wall time | Origin hits |
+|---|---|---|---|
+| inside the stale window | 40 x `STALE` | **0s** | 2 |
+| past the stale window | 39 x `MISS` | **3s** | 2 |
+
+**Identical origin cost, completely different user experience.** Coalescing stops
+60 requests becoming 60 database queries. It does nothing to stop all 60 waiting
+for the one query that does run. Only serving stale does that — and only because
+we built it, since the free plan does not honour `stale-while-revalidate`.
+
+### Serving stale when the origin is down
+
+Added to the Worker: a copy kept past its stale window purely as outage
+insurance, served if the origin throws or returns 5xx. Caching the 5xx instead
+would spread the outage. Also added +/-15% jitter to stored lifetimes, so objects
+cached during a spike do not all expire together and recreate that spike.
+
+`/api/toggle` on the origin flips a failure flag, because a URL that *always*
+fails cannot reproduce the case that matters: content that was healthy, got
+cached, and only then started failing.
+
+Measured:
+
+| Situation | Visitor sees |
+|---|---|
+| origin broken, nothing cached | **500** — correct, there is nothing to serve |
+| origin broken, copy cached | **200 with old content** — site stayed up |
+
+### UNVERIFIED: the mechanism behind that second row
+
+The outcome is right but **it is not this code that produced it**. The response
+carried `X-Edge-Cache: MISS`, meaning the Worker believed the origin returned
+200 — so the `stale-if-error` branch never executed. Reproduced three times,
+including with a route deliberately shortened to a 5s/5s window.
+
+Something between the Worker and the Node process served a stale 200 while the
+origin returned 500 to direct requests. Render's own Cloudflare was checked and
+reported `DYNAMIC`, so it is not a confirmed explanation.
+
+**The stale-if-error code is deployed and untested.** Do not trust it without
+verifying it against an origin whose stack is fully under your control.
+
+This is the Module 4 lesson one layer deeper: **you cannot verify your own cache
+logic while an uncontrolled cache sits beneath it.** Addressing the origin
+hostname directly removed *our* zone's cache from the path, but that hostname is
+itself behind infrastructure we do not control.
+
+### What actually defends an origin
+
+| Defence | Available here | Protects |
+|---|---|---|
+| per-colo coalescing | free, automatic | origin |
+| stale-while-revalidate | built in the Worker | **user** |
+| stale-if-error | written, unverified | user, during an outage |
+| TTL jitter | built in the Worker | origin, against synchronised expiry |
+| versioned URLs | free | avoids invalidation entirely |
+| tiered cache / origin shield | **paid only** | origin, across colos |
+
+The cross-colo gap is real and unfixable on this plan: one purge still means one
+origin fetch per city. Tiered caching is the paid answer; the free mitigations
+are long stale windows and never purging when a version bump would do.
+
+### Commands
+
+    # stampede one colo
+    seq 60 | xargs -P 60 -I{} curl -sS -o /dev/null -D- "$URL" \
+      | grep -i x-edge-cache | awk '{print $2}' | sort | uniq -c
+
+    # break / heal the origin
+    curl "$ORIGIN/api/toggle?status=500"
+    curl "$ORIGIN/api/toggle?clear=1"
+
+    # note: macOS has no `timeout`; `wrangler tail` needs gtimeout or a manual stop
+
+---
+
 <!-- KEEP THIS LAST. New module notes go ABOVE this marker. -->
 
 ## Status
@@ -825,4 +919,4 @@ thundering herd, and Module 6 makes it far worse on purpose before fixing it.
 - [x] Module 3 — caching strategies: eligibility, TTLs, cache keys, Vary
 - [x] Module 4 — path-based routing in a Worker (deployed; SWR + key normalisation verified)
 - [x] Module 5 — invalidation: versioned URLs, purge limits, generational keys
-- [ ] Module 6 — thundering herd
+- [x] Module 6 — thundering herd (stale-if-error written but UNVERIFIED — see notes)
