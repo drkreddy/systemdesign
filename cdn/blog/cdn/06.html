@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The thundering herd — CDN lab</title>
+<meta name="description" content="What happens when every cache empties at once, which defence protects the origin, and which protects the user.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/cdn/05.html">← Previous</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">CDN · post 6 of 6</p>
+<h1>The thundering herd</h1>
+<p class="standfirst">Every cache empties at the same moment, and every one of them asks your server the same question at the same moment.</p>
+
+<p>The setup has appeared three times already without being the subject. Caches are per-city, so ten cities means ten independent fetches. Expiry isn't staggered, so popular objects go cold together. And clearing a cache empties every city simultaneously.</p>
+
+<p>That last one is measurable. One purge of one file, measured across ten cities:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Moment</th><th>Result</th><th>Global median</th></tr></thead>
+  <tbody>
+    <tr><td>Before the purge</td><td>mostly HIT</td><td class="n">132ms</td></tr>
+    <tr><td>Immediately after</td><td>not yet propagated</td><td class="n">164ms</td></tr>
+    <tr><td>60 seconds after</td><td>7 MISS, 1 HIT</td><td class="n"><strong>549ms</strong></td></tr>
+  </tbody>
+</table></div>
+
+<p><strong>One purge made the site four times slower worldwide</strong>, because every city lost its copy and went back to Oregon at once.</p>
+
+<h2>Run it: fire ten requests simultaneously</h2>
+<p>This asks for a slow, uncached object from ten parallel requests at once. Watch how many actually reach the origin.</p>
+
+<div class="lab"
+     data-widget="stampede"
+     data-experiment="cdn/stampede"
+     data-runs="10"
+     data-title="Ten simultaneous requests for one cold object"
+     data-note="The origin stamps a counter on every response it serves. Repeated values mean the edge multiplied one answer.">
+</div>
+
+<h2>What I got wrong here</h2>
+<p>My prediction was that 60 concurrent misses would produce 60 origin requests. The measured answer was <strong>2</strong>.</p>
+
+<p>Cloudflare recognises identical in-flight requests to the same origin object and <strong>collapses them into one</strong>. That protection is free, automatic, and contradicts the usual telling of this story. If you have been told that N simultaneous misses means N database queries, measure it before believing it.</p>
+
+<dl class="def">
+  <dt>request coalescing</dt>
+  <dd>When several identical requests arrive while one is already in flight, the cache waits for that one and answers them all from its result. Applies per city — which is precisely its limit.</dd>
+</dl>
+
+<h2>The distinction that actually matters</h2>
+<p>The same burst of 40 requests, differing only in when it arrived relative to the cached copy's lifetime:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Load arrives</th><th>Cache status</th><th>Total wait</th><th>Reached the origin</th></tr></thead>
+  <tbody>
+    <tr><td>inside the stale window</td><td>40 × <span class="chip stale">STALE</span></td><td class="n"><strong>0s</strong></td><td class="n">2</td></tr>
+    <tr><td>past the stale window</td><td>39 × <span class="chip miss">MISS</span></td><td class="n"><strong>3s</strong></td><td class="n">2</td></tr>
+  </tbody>
+</table></div>
+
+<p>Identical cost to the origin. Completely different experience for the visitor. That gap is the real lesson:</p>
+
+<ul>
+  <li><strong>Coalescing protects the origin.</strong> It stops 40 requests becoming 40 database queries.</li>
+  <li><strong>Serving stale protects the user.</strong> It stops those 40 people waiting while the one query that does run completes.</li>
+</ul>
+
+<p>They solve different halves of the problem, and you need both. The second one you have to build yourself, as post 5 describes.</p>
+
+<h2>The defences, honestly rated</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>Defence</th><th>Available free</th><th>Protects</th></tr></thead>
+  <tbody>
+    <tr><td>per-city request coalescing</td><td>yes, automatic</td><td>the origin</td></tr>
+    <tr><td>stale-while-revalidate</td><td>build it yourself</td><td><strong>the user</strong></td></tr>
+    <tr><td>jittered lifetimes</td><td>build it yourself</td><td>the origin, against synchronised expiry</td></tr>
+    <tr><td>versioned filenames</td><td>yes</td><td>avoids invalidation entirely</td></tr>
+    <tr><td>tiered cache / origin shield</td><td><strong>paid only</strong></td><td>the origin, across cities</td></tr>
+  </tbody>
+</table></div>
+
+<p><strong>Jitter</strong> is the cheapest thing on that list and the most overlooked. If everything cached during a traffic spike is given exactly the same lifetime, it all expires together and recreates that spike against your origin, on a loop. Scattering each lifetime by ±15% breaks the synchronisation permanently.</p>
+
+<p>The cross-city gap is real and cannot be closed on a free plan. A purge still costs one origin fetch per city. The free mitigations are long stale windows, and preferring a version bump over a purge whenever you can.</p>
+
+<h2>The best strategy is not needing any of this</h2>
+<p>Files named after their contents — <code>app.a3f9b2c.js</code> — never need invalidating. New content means a new address, so the old copy simply stops being requested and ages out unused. No purge, no propagation delay, no stampede.</p>
+
+<p>It only works for content referenced <em>indirectly</em>, through HTML that itself has a short lifetime. You can't version <code>/api/products</code>, because visitors ask for that address by name. But for everything you can, it beats every other option on this page.</p>
+
+<div class="note">
+  <span class="tag">The thread running through all six posts</span>
+  <p>Every serious bug here was invisible in the metrics people normally watch. Wrong-language content served as a healthy HIT. A permanently frozen cache reporting perfect statuses. A stale-serving feature that silently never fired. Each was caught by one thing: a counter on the origin that answered "did this actually reach me?" — a question no cache header can answer honestly about itself.</p>
+</div>
+
+<div class="postnav">
+  <a href="/cdn/05.html">← Serving stale on purpose</a>
+  <a href="/">All posts →</a>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>

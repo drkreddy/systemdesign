@@ -9,11 +9,13 @@
 //   CORS preflight -> resolve lab/experiment -> kill switch -> clamp params
 //   -> namespace cache key per visitor -> serve from cache or origin -> expose headers
 
-const ALLOWED_ORIGINS = new Set([
-  'https://blog.drkreddy.com',
-  'http://localhost:8788',   // wrangler pages dev
-  'http://localhost:5173',
-]);
+const ALLOWED_ORIGINS = new Set(['https://blog.drkreddy.com']);
+
+// Any localhost port is allowed so the blog can be developed against the real
+// edge. This is not a meaningful relaxation: play is a public surface with
+// capped parameters, so permitting a local page to call it grants nothing that
+// curl does not already have.
+const isLocalDev = (origin) => /^http:\/\/localhost:\d+$/.test(origin || '');
 
 // Browser JS cannot read a response header unless it is named here. Without
 // this the widgets would show a body and no cache status, which is the entire
@@ -72,7 +74,9 @@ export function buildRegistry(labs) {
 
 function corsHeaders(request) {
   const origin = request.headers.get('Origin');
-  const allow = ALLOWED_ORIGINS.has(origin) ? origin : 'https://blog.drkreddy.com';
+  const allow = (ALLOWED_ORIGINS.has(origin) || isLocalDev(origin))
+    ? origin
+    : 'https://blog.drkreddy.com';
   return {
     'Access-Control-Allow-Origin': allow,
     'Access-Control-Expose-Headers': EXPOSED,

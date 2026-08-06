@@ -1,0 +1,13 @@
+# Cloudflare Pages header rules.
+/assets/*
+  # Assets are not fingerprinted yet, so a long immutable TTL would strand
+  # readers on old CSS after a deploy. One hour is a deliberate compromise
+  # until the build step adds content hashes.
+  Cache-Control: public, max-age=3600
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  # The pages are static and load only their own assets; the only network call
+  # is the live-experiment fetch to play.drkreddy.com.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://play.drkreddy.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

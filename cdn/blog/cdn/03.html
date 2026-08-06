@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Every city caches separately — CDN lab</title>
+<meta name="description" content="Warming the cache in Singapore does nothing for Tokyo. Measured from ten cities around the world.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/cdn/02.html">← Previous</a>
+  <a href="/cdn/04.html">Next: how cache keys shatter →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">CDN · post 3 of 6</p>
+<h1>Every city caches separately</h1>
+<p class="standfirst">There isn't <em>a</em> cache. There are hundreds, one per city, and they don't share with each other.</p>
+
+<p>This surprises almost everyone, and it quietly explains the hardest problem in the subject. To test it, the lab warmed a file from India — confirmed <span class="chip hit">HIT</span> — and then requested the same file from ten cities worldwide.</p>
+
+<p>Nine of them missed.</p>
+
+<figure>
+  <svg viewBox="0 0 460 140" role="img" aria-label="One object requested from ten cities produces nine separate fetches from the origin, because each edge caches independently.">
+    <rect x="186" y="6" width="88" height="24" rx="2" fill="var(--origin-wash)" stroke="var(--origin)" stroke-width="1.5"/>
+    <text x="230" y="22" class="svg-label-strong" text-anchor="middle" fill="var(--origin)">Oregon</text>
+    <g class="svg-line" stroke="var(--origin)" opacity=".55">
+      <line x1="205" y1="30" x2="30" y2="82"/><line x1="210" y1="30" x2="80" y2="82"/>
+      <line x1="215" y1="30" x2="130" y2="82"/><line x1="222" y1="30" x2="180" y2="82"/>
+      <line x1="238" y1="30" x2="280" y2="82"/><line x1="245" y1="30" x2="330" y2="82"/>
+      <line x1="250" y1="30" x2="380" y2="82"/><line x1="255" y1="30" x2="430" y2="82"/>
+    </g>
+    <line x1="230" y1="30" x2="230" y2="82" class="svg-line" stroke="var(--edge)" stroke-dasharray="2 3" opacity=".5"/>
+    <g fill="var(--origin-wash)" stroke="var(--origin)" stroke-width="1.3">
+      <rect x="12" y="82" width="36" height="20" rx="2"/><rect x="62" y="82" width="36" height="20" rx="2"/>
+      <rect x="112" y="82" width="36" height="20" rx="2"/><rect x="162" y="82" width="36" height="20" rx="2"/>
+      <rect x="262" y="82" width="36" height="20" rx="2"/><rect x="312" y="82" width="36" height="20" rx="2"/>
+      <rect x="362" y="82" width="36" height="20" rx="2"/><rect x="412" y="82" width="36" height="20" rx="2"/>
+    </g>
+    <rect x="212" y="82" width="36" height="20" rx="2" fill="var(--edge-wash)" stroke="var(--edge)" stroke-width="1.3"/>
+    <text x="230" y="96" class="svg-label" text-anchor="middle" fill="var(--edge)">HIT</text>
+    <g class="svg-label" fill="var(--origin)" text-anchor="middle">
+      <text x="30" y="96">MISS</text><text x="80" y="96">MISS</text><text x="130" y="96">MISS</text><text x="180" y="96">MISS</text>
+      <text x="280" y="96">MISS</text><text x="330" y="96">MISS</text><text x="380" y="96">MISS</text><text x="430" y="96">MISS</text>
+    </g>
+    <text x="230" y="126" class="svg-label" text-anchor="middle">one file · ten cities · nine separate journeys to Oregon</text>
+  </svg>
+  <figcaption>The one HIT is the city that was warmed. Every other edge had to fetch the file for itself.</figcaption>
+</figure>
+
+<p>Running the same ten cities again, once every edge held a copy:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Run</th><th>Result</th><th>Median total</th><th>Median TTFB</th><th>Reached Oregon</th></tr></thead>
+  <tbody>
+    <tr><td>First visit per city</td><td>1 HIT, <strong>9 MISS</strong></td><td class="n">429ms</td><td class="n">294ms</td><td class="n">9</td></tr>
+    <tr><td>Once every city is warm</td><td><strong>10 HIT</strong></td><td class="n">99ms</td><td class="n">12ms</td><td class="n">0</td></tr>
+  </tbody>
+</table></div>
+
+<p>TTFB fell from 294ms to 12ms, and the second run added <strong>zero</strong> origin requests. Ten more requests worldwide and the server in Oregon never heard about any of them.</p>
+
+<h2>Run it: your city, from your browser</h2>
+<p>The widget below runs against whichever edge is nearest to <em>you</em>. If nobody near you has run this experiment recently, the first request is a MISS — you are warming your own city's cache, and the readers after you benefit.</p>
+
+<div class="lab"
+     data-widget="sequence"
+     data-experiment="cdn/cache-status"
+     data-runs="4"
+     data-title="Warming the cache in your city"
+     data-note="Your requests are namespaced to you, so you're seeing your own sequence rather than someone else's.">
+</div>
+
+<h2>Anycast doesn't always pick the nearest city</h2>
+<p>One assumption worth dropping. The measurements kept showing routing that geography wouldn't predict:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Probe located in</th><th>Served by</th></tr></thead>
+  <tbody>
+    <tr><td>Singapore</td><td class="n">HKG — Hong Kong</td></tr>
+    <tr><td>Pretoria</td><td class="n">OTP — Bucharest</td></tr>
+    <tr><td>Falkenstein</td><td class="n">SOF — Sofia</td></tr>
+  </tbody>
+</table></div>
+
+<dl class="def">
+  <dt>anycast</dt>
+  <dd>One address announced from hundreds of locations at once; your packets reach whichever the network considers closest. "Closest" is decided by BGP — which follows peering agreements and commercial relationships, not kilometres.</dd>
+</dl>
+
+<p>Those mis-routed probes were also the slowest. A bad colo assignment adds a leg to every journey, and it isn't something you control.</p>
+
+<div class="note">
+  <span class="tag">Where this is going</span>
+  <p>If one object can cost nine origin fetches simply by being popular in nine cities, consider what happens when you <em>clear</em> your cache. Every city loses its copy at the same moment, and every city asks your server at the same moment. That's post 6.</p>
+</div>
+
+<div class="postnav">
+  <a href="/cdn/02.html">← Turning a CDN on caches nothing</a>
+  <a href="/cdn/04.html">Next: how cache keys shatter →</a>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>

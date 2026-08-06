@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fresh, stale, and serving old data on purpose — CDN lab</title>
+<meta name="description" content="Answering in 55ms from a server that takes two seconds. Plus the cache bug that reported perfect health while frozen forever.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/cdn/04.html">← Previous</a>
+  <a href="/cdn/06.html">Next: the thundering herd →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">CDN · post 5 of 6</p>
+<h1>Fresh, stale, and serving old data on purpose</h1>
+<p class="standfirst">When a cached copy expires, the obvious move is to make the next visitor wait for a fresh one. There is a much better option.</p>
+
+<p>A cached object has a lifetime. When it runs out, something has to happen, and the naive answer punishes whoever happens to arrive at that moment — they pay the full journey to Oregon so that everyone after them doesn't.</p>
+
+<p><strong>Stale-while-revalidate</strong> takes a different view: hand that visitor the slightly-old copy <em>immediately</em>, and fetch the new one in the background. Nobody waits.</p>
+
+<figure>
+  <svg viewBox="0 0 460 140" role="img" aria-label="A cached object's life: fresh, then a stale window where it is served instantly while refreshing behind the scenes, then too old to use.">
+    <rect x="0" y="26" width="140" height="30" fill="var(--edge-wash)" stroke="var(--edge)" stroke-width="1.5"/>
+    <rect x="140" y="26" width="210" height="30" fill="var(--stale-wash)" stroke="var(--stale)" stroke-width="1.5"/>
+    <rect x="350" y="26" width="106" height="30" fill="var(--ground-3)" stroke="var(--ink-3)" stroke-dasharray="3 3"/>
+    <text x="70" y="46" class="svg-label-strong" text-anchor="middle" fill="var(--edge)">FRESH</text>
+    <text x="245" y="46" class="svg-label-strong" text-anchor="middle" fill="var(--stale)">STALE — still served instantly</text>
+    <text x="403" y="46" class="svg-label" text-anchor="middle">too old</text>
+    <text x="0" y="72" class="svg-label">0s</text>
+    <text x="134" y="72" class="svg-label">5s</text>
+    <text x="344" y="72" class="svg-label">15s</text>
+
+    <line x1="245" y1="84" x2="245" y2="100" class="svg-line" stroke="var(--stale)" marker-end="url(#s)"/>
+    <rect x="140" y="104" width="210" height="22" rx="2" fill="none" stroke="var(--stale)" stroke-width="1.2"/>
+    <text x="245" y="119" class="svg-label" text-anchor="middle" fill="var(--stale)">answered in 55ms · refresh runs behind the visitor</text>
+    <defs><marker id="s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--stale)"/></marker></defs>
+  </svg>
+  <figcaption>The visitor gets data a few seconds old. In exchange, nobody ever waits for the origin.</figcaption>
+</figure>
+
+<h2>Run it: watch one object age</h2>
+<p>This experiment has a 5-second freshness window and a 10-second stale window, so the whole lifecycle fits inside one page view. Watch for the <span class="chip stale">STALE</span> row — it is served just as fast as a hit, from a copy the edge knows is out of date.</p>
+
+<div class="lab"
+     data-widget="timeline"
+     data-experiment="cdn/ttl-timeline"
+     data-title="Fresh → stale → refreshed, live"
+     data-note="Takes about ten seconds. The age counter resets once the background refresh completes.">
+</div>
+
+<p>Measured against an origin deliberately taking 2000ms to respond, a request arriving in the stale window returned in <strong>165ms</strong>. The refresh happened afterwards, invisibly.</p>
+
+<h2>Cloudflare's free plan doesn't do this</h2>
+<p>Sending <code>stale-while-revalidate</code> in a header and testing it produced <span class="chip miss">EXPIRED</span> — meaning the visitor waited for the full round trip. Serving stale is a paid feature.</p>
+
+<p>So the edge worker behind these posts implements it by hand. The interesting part isn't the idea, it's a subtlety that made the first version silently useless.</p>
+
+<div class="note">
+  <span class="tag">The bug that reported perfect health</span>
+  <p>A cache API will refuse to return an entry that has expired according to its own headers. Storing a copy with a lifetime equal to the <em>fresh</em> window therefore deletes it at exactly the moment the stale window opens — leaving nothing to serve stale. The feature never fires, and the symptom is an ordinary-looking MISS, which reads as a cold cache rather than a bug.</p>
+  <p>The fix: store with a lifetime covering <strong>fresh + stale</strong>, and track freshness yourself with a timestamp. <strong>The cache's idea of "expired" and your application's idea of "stale" have to be different things</strong> — otherwise serve-stale cannot be built at all. That holds for Redis and Memcached just as much as for a CDN.</p>
+</div>
+
+<h2>The worse bug underneath it</h2>
+<p>The second version looked like it worked. Cache statuses cycled <span class="chip miss">MISS</span> → <span class="chip hit">HIT</span> → <span class="chip stale">STALE</span> → <span class="chip hit">HIT</span>, ages reset correctly, responses were fast.</p>
+
+<p>The content was frozen permanently.</p>
+
+<figure>
+  <svg viewBox="0 0 460 120" role="img" aria-label="A second cache sat between the worker and the origin, so background refreshes read cached data instead of fresh data from the server.">
+    <rect x="0" y="18" width="80" height="28" rx="2" class="svg-box"/>
+    <text x="40" y="36" class="svg-label" text-anchor="middle">visitor</text>
+    <line x1="80" y1="32" x2="106" y2="32" class="svg-line" marker-end="url(#t)"/>
+    <rect x="110" y="18" width="96" height="28" rx="2" fill="var(--edge-wash)" stroke="var(--edge)" stroke-width="1.5"/>
+    <text x="158" y="36" class="svg-label-strong" text-anchor="middle" fill="var(--edge)">your cache</text>
+    <line x1="206" y1="32" x2="232" y2="32" class="svg-line" marker-end="url(#t)"/>
+    <rect x="236" y="18" width="110" height="28" rx="2" fill="var(--origin-wash)" stroke="var(--origin)" stroke-width="2"/>
+    <text x="291" y="36" class="svg-label-strong" text-anchor="middle" fill="var(--origin)">a 2nd cache</text>
+    <line x1="346" y1="32" x2="372" y2="32" class="svg-line" stroke-dasharray="3 3" opacity=".4" marker-end="url(#t)"/>
+    <rect x="376" y="18" width="80" height="28" rx="2" fill="none" stroke="var(--ink-3)" stroke-dasharray="3 3"/>
+    <text x="416" y="36" class="svg-label" text-anchor="middle" opacity=".6">Oregon</text>
+    <text x="236" y="64" class="svg-label" fill="var(--origin)">nobody knew this was here</text>
+    <text x="376" y="64" class="svg-label" opacity=".6">never reached</text>
+    <text x="0" y="96" class="svg-label" fill="var(--edge)">headers said: MISS → HIT → STALE → HIT, ages resetting, fast</text>
+    <text x="0" y="112" class="svg-label-strong" fill="var(--origin)">reality: the same bytes forever</text>
+    <defs><marker id="t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/></marker></defs>
+  </svg>
+  <figcaption>The "refresh from the origin" was reading another cache and storing the result as though it were fresh.</figcaption>
+</figure>
+
+<p>A cache that is stale <em>forever</em> is worse than no cache, because it is silent. The only thing that caught it was the counter on the origin server, which had been sitting there the whole time reading <code>1</code>.</p>
+
+<div class="note">
+  <span class="tag">The rule this generalises to</span>
+  <p>When you put a cache in front of something that is already cached, revalidation silently reads the inner cache. Identical trap with an application cache over a database replica, or Redis over a query cache. <strong>Always check freshness against the real source of truth, never against the layer immediately beneath you.</strong></p>
+</div>
+
+<div class="postnav">
+  <a href="/cdn/04.html">← How cache keys shatter</a>
+  <a href="/cdn/06.html">Next: the thundering herd →</a>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>

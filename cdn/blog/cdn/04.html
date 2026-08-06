@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How cache keys shatter — CDN lab</title>
+<meta name="description" content="Five people share one link on different platforms and your cache becomes five objects. Plus the caching bug that is really a security bug.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/cdn/03.html">← Previous</a>
+  <a href="/cdn/05.html">Next: serving stale on purpose →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">CDN · post 4 of 6</p>
+<h1>How cache keys shatter</h1>
+<p class="standfirst">A site with flawless caching headers can still run a terrible hit rate, because of characters other people append to your URLs.</p>
+
+<p>A cache files each copy under a <strong>key</strong>. By default that key is the full address, including everything after the <code>?</code>. Two requests share a cached copy only if their keys match exactly.</p>
+
+<p>Now consider five people sharing the same page from different places:</p>
+
+<pre><code>/article                                <span style="color:var(--edge)">HIT</span>
+/article?utm_source=twitter             <span style="color:var(--origin)">MISS</span>
+/article?utm_source=facebook            <span style="color:var(--origin)">MISS</span>
+/article?fbclid=abc123                  <span style="color:var(--origin)">MISS</span>
+/article?utm_source=x&amp;utm_medium=social  <span style="color:var(--origin)">MISS</span></code></pre>
+
+<p>Four journeys to Oregon for what any human would call one page. You didn't add those parameters — Facebook, Google Ads and email tools did, on the way in.</p>
+
+<dl class="def">
+  <dt>cache key</dt>
+  <dd>The label a cached copy is stored under. Change one character and, as far as the cache is concerned, it's a different object entirely.</dd>
+</dl>
+
+<h2>Run it: fragment a cache, or don't</h2>
+<p>The lab's edge <strong>strips tracking parameters before computing the key</strong>. So the decorated URLs below should all land on the same cached copy — one MISS, then hits.</p>
+
+<div class="lab"
+     data-widget="cachekey"
+     data-experiment="cdn/cache-key"
+     data-title="One object, four decorated URLs"
+     data-note="Without key normalisation this produces four origin fetches instead of one.">
+</div>
+
+<p>Getting that behaviour took writing code. On Cloudflare's free plan, choosing which parameters count toward the key is an Enterprise feature — the dashboard shows the option greyed out. The edge worker here does it in about ten lines:</p>
+
+<pre><code>const kept = [...url.searchParams.entries()]
+  .filter(([k]) =&gt; !TRACKING.some(re =&gt; re.test(k)))
+  .sort(([a], [b]) =&gt; a.localeCompare(b));</code></pre>
+
+<p>The sort matters too: <code>?a=1&amp;b=2</code> and <code>?b=2&amp;a=1</code> are the same resource, and without sorting they are two cache entries.</p>
+
+<h2>The one that isn't a performance bug</h2>
+<p>HTTP has a header for "my answer depends on this request header". <code>Vary: Accept-Language</code> should give each language its own cached copy. Here is what actually happened when the lab tried it:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Visitor asked for</th><th>Cache status</th><th>What they received</th></tr></thead>
+  <tbody>
+    <tr><td class="n">en-US</td><td><span class="chip miss">MISS</span></td><td>English — correct</td></tr>
+    <tr><td class="n">fr-FR</td><td><span class="chip hit">HIT</span></td><td><strong>English — wrong</strong></td></tr>
+    <tr><td class="n">ja-JP</td><td><span class="chip hit">HIT</span></td><td><strong>English — wrong</strong></td></tr>
+    <tr><td class="n">de-DE</td><td><span class="chip hit">HIT</span></td><td><strong>English — wrong</strong></td></tr>
+  </tbody>
+</table></div>
+
+<p><strong>Cloudflare honours <code>Vary: Accept-Encoding</code> and ignores every other value.</strong> It cached one copy and served it to everybody.</p>
+
+<p>Notice the shape of that failure. A correct shared cache would fragment per language and your hit rate would collapse — annoying, visible, easy to spot. This does the opposite: the hit rate stays beautiful and the <em>answers</em> are wrong.</p>
+
+<div class="note">
+  <span class="tag">Why this is a security bug</span>
+  <p>Picture an application that ships <code>Cache-Control: public, max-age=60</code> alongside <code>Vary: Cookie</code>, reasoning that each session gets its own entry. Behind a CDN that ignores <code>Vary</code>, the first user's personalised response is cached and served to <strong>every subsequent visitor</strong>. That isn't a slow page. That's one customer seeing another customer's account.</p>
+</div>
+
+<p>Every wrong answer above was a healthy-looking <span class="chip hit">HIT</span>. No cache-status check could have caught it. Only comparing the <em>body</em> against what was requested exposed the problem.</p>
+
+<h3>What to do instead</h3>
+<ul>
+  <li><strong>Put the variation in the address</strong> — <code>/fr/page</code>, <code>?lang=fr</code>. Then it's part of the key and cannot be confused.</li>
+  <li><strong>Put it in the key explicitly</strong>, via edge code or cache-key configuration.</li>
+  <li><strong>Mark genuinely per-user content <code>private, no-store</code></strong> and keep it away from shared caches altogether.</li>
+</ul>
+
+<p>The general lesson outlives Cloudflare: <code>Vary</code> is the least reliably implemented corner of HTTP caching. Never rely on it for correctness at a CDN.</p>
+
+<div class="note">
+  <span class="tag">The habit</span>
+  <p>When you test a cache, assert on <strong>what came back</strong>, not on what the cache says it did. Both failures in this post were invisible to the metrics people normally watch.</p>
+</div>
+
+<div class="postnav">
+  <a href="/cdn/03.html">← Every city caches separately</a>
+  <a href="/cdn/05.html">Next: serving stale on purpose →</a>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>

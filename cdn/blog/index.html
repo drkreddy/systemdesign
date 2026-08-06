@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a CDN actually works — measured, not described</title>
+<meta name="description" content="Six short posts about CDNs, each with an experiment you can run yourself against a real edge and a real server in Oregon.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/cdn/01.html">CDN</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">A lab you can run from this page</p>
+<h1>How a CDN actually works</h1>
+<p class="standfirst">Six short posts. Every claim came from measuring a real setup — an instrumented server in Oregon behind Cloudflare — and every experiment can be re-run from your browser, right now, against that same infrastructure.</p>
+
+<p>Most CDN explanations stop at "it keeps copies closer to users". That's true and it's not enough to work with. It doesn't tell you why turning a CDN on often caches <em>nothing</em>, why a cache can serve the wrong visitor's content while reporting perfect health, or why clearing your cache can make your site four times slower worldwide.</p>
+
+<p>Each post below has a <strong>Run it live</strong> button. The recorded numbers appear instantly; pressing the button fires real requests from your browser and shows you what actually happens today.</p>
+
+<div class="cards">
+  <a class="card" href="/cdn/01.html">
+    <span class="n">01</span>
+    <h3>Why distance is the whole problem</h3>
+    <p>A round trip to Oregon costs ~200ms no matter how fast your code is. What a cache hit actually removes.</p>
+  </a>
+  <a class="card" href="/cdn/02.html">
+    <span class="n">02</span>
+    <h3>Turning a CDN on caches nothing</h3>
+    <p>A textbook-perfect Cache-Control header, and still zero caching. Two decisions that look like one.</p>
+  </a>
+  <a class="card" href="/cdn/03.html">
+    <span class="n">03</span>
+    <h3>Every city caches separately</h3>
+    <p>Warming the cache in Singapore does nothing for Tokyo. Measured across ten cities.</p>
+  </a>
+  <a class="card" href="/cdn/04.html">
+    <span class="n">04</span>
+    <h3>How cache keys shatter</h3>
+    <p>Five people share one link on different platforms and your cache becomes five objects.</p>
+  </a>
+  <a class="card" href="/cdn/05.html">
+    <span class="n">05</span>
+    <h3>Fresh, stale, and serving old data on purpose</h3>
+    <p>The trick that answers in 55ms from a server taking two seconds.</p>
+  </a>
+  <a class="card" href="/cdn/06.html">
+    <span class="n">06</span>
+    <h3>The thundering herd</h3>
+    <p>What happens when every cache empties at once — and which defence protects whom.</p>
+  </a>
+</div>
+
+<h2>How the live experiments work</h2>
+<p>Requests go to <code>play.drkreddy.com</code>, a deliberately small public surface in front of the real lab. Every parameter is capped, only a fixed list of experiments exists, and your requests are namespaced to you — so two readers running the same experiment see their own independent results rather than confusing each other.</p>
+
+<p>If the live path is unavailable, busy, or rate limited, the widgets fall back to recorded data and say so. You should never see a broken box on a page whose job is explaining something.</p>
+
+<div class="note">
+  <span class="tag">A note on honesty</span>
+  <p>Several of these posts describe things I got wrong while building this, including a cache that reported perfect health while serving permanently frozen content. Those are kept in rather than tidied away, because the debugging is more useful than the conclusion.</p>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turning a CDN on caches nothing — CDN lab</title>
+<meta name="description" content="A textbook-perfect Cache-Control header and still zero caching. The two decisions that look like one.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/cdn/01.html">← Previous</a>
+  <a href="/cdn/03.html">Next: every city caches separately →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">CDN · post 2 of 6</p>
+<h1>Turning a CDN on caches nothing</h1>
+<p class="standfirst">The most disorienting result in this whole lab: send a perfect caching header, put a CDN in front, and watch every single request still travel to Oregon.</p>
+
+<p>Here is a response the lab's API sends. There is nothing wrong with it:</p>
+
+<pre><code>Cache-Control: public, max-age=300</code></pre>
+
+<p>Public, cacheable, good for five minutes. Four requests through Cloudflare produced four <span class="chip none">DYNAMIC</span> responses and four trips to Oregon. Not one was cached.</p>
+
+<h2>Two decisions that look like one</h2>
+
+<figure>
+  <svg viewBox="0 0 460 150" role="img" aria-label="Caching requires passing two gates: the CDN decides eligibility, then your header decides duration. Failing the first means the header is never read.">
+    <rect x="0" y="24" width="132" height="50" rx="2" class="svg-box"/>
+    <text x="66" y="44" class="svg-label-strong" text-anchor="middle">GATE 1</text>
+    <text x="66" y="60" class="svg-label" text-anchor="middle">may I cache this?</text>
+    <text x="0" y="90" class="svg-label" fill="var(--ink-3)">the CDN decides,</text>
+    <text x="0" y="104" class="svg-label" fill="var(--ink-3)">from the file type</text>
+
+    <line x1="132" y1="49" x2="186" y2="49" class="svg-line" marker-end="url(#a)"/>
+    <text x="159" y="42" class="svg-label" text-anchor="middle" fill="var(--edge)">yes</text>
+
+    <rect x="190" y="24" width="132" height="50" rx="2" class="svg-box"/>
+    <text x="256" y="44" class="svg-label-strong" text-anchor="middle">GATE 2</text>
+    <text x="256" y="60" class="svg-label" text-anchor="middle">for how long?</text>
+    <text x="190" y="90" class="svg-label" fill="var(--ink-3)">your Cache-Control</text>
+    <text x="190" y="104" class="svg-label" fill="var(--ink-3)">decides</text>
+
+    <line x1="322" y1="49" x2="376" y2="49" class="svg-line" marker-end="url(#a)"/>
+    <rect x="380" y="36" width="76" height="26" rx="2" fill="var(--edge-wash)" stroke="var(--edge)" stroke-width="1.5"/>
+    <text x="418" y="53" class="svg-label-strong" text-anchor="middle" fill="var(--edge)">cached</text>
+
+    <line x1="66" y1="74" x2="66" y2="124" class="svg-line" stroke="var(--origin)" marker-end="url(#b)"/>
+    <text x="78" y="130" class="svg-label" fill="var(--origin)">no → never cached, and your header is never read</text>
+    <defs>
+      <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/></marker>
+      <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--origin)"/></marker>
+    </defs>
+  </svg>
+  <figcaption>Your header answers the second question. Cloudflare was still saying no to the first.</figcaption>
+</figure>
+
+<p>Cloudflare decides <strong>whether</strong> something may be cached from its <strong>file extension</strong> — roughly <code>.js .css .jpg .png .svg .woff .pdf</code>. An address like <code>/api/time</code> has no extension, so it is ineligible, and an ineligible response never has its <code>Cache-Control</code> examined at all.</p>
+
+<p>That is why a JavaScript file cached with zero configuration while a JSON API refused to, no matter what it sent. To cache the API you must first tell Cloudflare it is allowed to, with a <strong>Cache Rule</strong>.</p>
+
+<div class="note">
+  <span class="tag">Not universal</span>
+  <p>This is a Cloudflare choice, not how the web works. Fastly and Akamai honour <code>Cache-Control</code> for any content type. Cloudflare's default is the conservative one — it won't accidentally cache a logged-in user's dashboard. Worth knowing which kind of CDN you're holding.</p>
+</div>
+
+<h2>Run it: an endpoint that will never cache</h2>
+<p>This one sends <code>no-store</code>. The Cache Rule allows caching; the header declines. Every request goes to Oregon, and the timestamp in the response changes every time.</p>
+
+<div class="lab"
+     data-widget="sequence"
+     data-experiment="cdn/never-cached"
+     data-runs="4"
+     data-title="Four requests to a no-store endpoint"
+     data-note="Compare the shape with post 1 — no cliff, because there is no caching.">
+</div>
+
+<h2>One word tells you which gate failed</h2>
+<p>Every Cloudflare response carries <code>cf-cache-status</code>. Two of its values are a precise diagnosis, and knowing the difference saves hours:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Value</th><th>Means</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td><span class="chip hit">HIT</span></td><td>served from the edge; your server never heard about it</td><td>nothing — this is the goal</td></tr>
+    <tr><td><span class="chip miss">MISS</span></td><td>allowed, but no copy was held; fetched and stored</td><td>nothing; the next one should HIT</td></tr>
+    <tr><td><span class="chip none">DYNAMIC</span></td><td><strong>gate 1 failed.</strong> Never considered</td><td>your Cache Rule</td></tr>
+    <tr><td><span class="chip none">BYPASS</span></td><td><strong>gate 2 failed.</strong> Allowed, but a header said no</td><td>your <code>Cache-Control</code></td></tr>
+    <tr><td><span class="chip miss">EXPIRED</span></td><td>was cached, time ran out, had to revalidate</td><td>longer TTL, or serve stale (post 5)</td></tr>
+  </tbody>
+</table></div>
+
+<p>When the lab's Cache Rule was added, <code>/api/time</code> moved from <span class="chip none">DYNAMIC</span> to <span class="chip none">BYPASS</span>. Nothing about the endpoint changed — the rule granted permission and the header declined it. That is the design you want: <strong>the rule grants permission, the header exercises it</strong>, so the application keeps control per endpoint instead of the CDN making blanket decisions.</p>
+
+<h2>Browsers and CDNs can be told different things</h2>
+<dl class="def">
+  <dt>max-age vs s-maxage</dt>
+  <dd><code>max-age</code> talks to everyone, browsers included. <code>s-maxage</code> talks only to <em>shared</em> caches like a CDN.</dd>
+</dl>
+
+<pre><code>Cache-Control: public, max-age=0, s-maxage=300</code></pre>
+
+<p>This says: <em>browsers, always check with me; CDN, shield my server for five minutes.</em> Measured, it produced a MISS then three HITs at the edge despite <code>max-age=0</code>. It is the workhorse pattern for dynamic content — users get fresh data while your database sees one request per five minutes per city instead of one per visitor.</p>
+
+<div class="postnav">
+  <a href="/cdn/01.html">← Why distance is the problem</a>
+  <a href="/cdn/03.html">Next: every city caches separately →</a>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>

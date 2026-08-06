@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why distance is the whole problem — CDN lab</title>
+<meta name="description" content="A round trip to Oregon costs about 200ms whatever your code does. What a cache hit actually removes, measured.">
+<link rel="stylesheet" href="/assets/lab.css">
+</head>
+<body>
+
+<nav class="topbar"><div class="inner">
+  <a class="home" href="/">drkreddy / labs</a>
+  <a href="/">All posts</a>
+  <a href="/cdn/02.html">Next: caching nothing →</a>
+</div></nav>
+
+<div class="wrap">
+
+<p class="eyebrow">CDN · post 1 of 6</p>
+<h1>Why distance is the whole problem</h1>
+<p class="standfirst">Your server is in one place. Physics charges you for every visitor who isn't near it, and no amount of optimisation buys that back.</p>
+
+<p>The lab behind these posts is a small Node server in Oregon. From India, a request to it travels roughly 13,000 km, and the answer travels 13,000 km back. Light in fibre covers about 200,000 km per second, and real network paths are nothing like straight lines, so that round trip costs somewhere around <strong>200 milliseconds</strong>.</p>
+
+<p>That number is not a performance problem you can fix. Your code could run in zero time and the visitor still waits. The only way to make it go away is to stop making the journey.</p>
+
+<figure>
+  <svg viewBox="0 0 460 180" role="img" aria-label="Without a CDN a request travels from India to Oregon and back. With one, it stops at a nearby edge server and only occasionally continues to Oregon.">
+    <text x="0" y="12" class="svg-title">WITHOUT A CDN</text>
+    <circle cx="16" cy="44" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="4" y="70" class="svg-label">you</text>
+    <line x1="28" y1="44" x2="400" y2="44" class="svg-line" stroke-dasharray="3 3"/>
+    <rect x="400" y="32" width="52" height="24" rx="2" fill="var(--origin-wash)" stroke="var(--origin)" stroke-width="1.5"/>
+    <text x="400" y="70" class="svg-label">Oregon</text>
+    <text x="140" y="36" class="svg-label" fill="var(--origin)">~200ms round trip, every request</text>
+
+    <line x1="0" y1="92" x2="460" y2="92" stroke="var(--rule)"/>
+
+    <text x="0" y="118" class="svg-title">WITH A CDN</text>
+    <circle cx="16" cy="150" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="4" y="176" class="svg-label">you</text>
+    <line x1="28" y1="150" x2="110" y2="150" class="svg-line"/>
+    <rect x="110" y="138" width="64" height="24" rx="2" fill="var(--edge-wash)" stroke="var(--edge)" stroke-width="1.5"/>
+    <text x="110" y="176" class="svg-label">edge near you</text>
+    <text x="38" y="140" class="svg-label" fill="var(--edge)">~10ms</text>
+    <line x1="174" y1="150" x2="400" y2="150" class="svg-line" stroke-dasharray="2 4" opacity=".45"/>
+    <text x="200" y="142" class="svg-label" opacity=".75">only when no copy is held</text>
+    <rect x="400" y="138" width="52" height="24" rx="2" fill="none" stroke="var(--ink-3)" stroke-dasharray="3 3"/>
+    <text x="400" y="176" class="svg-label" opacity=".7">Oregon</text>
+  </svg>
+  <figcaption>The long path still exists. It just stops being travelled on most requests — and that is the entire benefit.</figcaption>
+</figure>
+
+<dl class="def">
+  <dt>origin</dt>
+  <dd>Your real server, the only thing that can generate new content. Here, the Node app in Oregon.</dd>
+</dl>
+<dl class="def">
+  <dt>edge, PoP, colo</dt>
+  <dd>Three words for the same thing: a CDN data centre near your visitor. Cloudflare has 300+. They show up in response headers as three-letter codes — <code>BOM</code> Mumbai, <code>SIN</code> Singapore, <code>NRT</code> Tokyo.</dd>
+</dl>
+
+<h2>Run it: the same request, four times</h2>
+<p>This asks the lab for a deliberately expensive response. The first request has to reach Oregon. The rest should not.</p>
+
+<div class="lab"
+     data-widget="sequence"
+     data-experiment="cdn/expensive"
+     data-runs="4"
+     data-ms="1200"
+     data-slow="true"
+     data-title="Four requests for one expensive response"
+     data-note="The origin sleeps to imitate real work — a database query, a rendered page.">
+</div>
+
+<p>The shape is the point. One slow request, then a cliff. Nothing about the server got faster; the second request simply never went there.</p>
+
+<h2>What TTFB means, and why it's the number that moves</h2>
+<p>A request isn't one action, it's five, and only one of them changes when caching starts working.</p>
+
+<figure>
+  <svg viewBox="0 0 460 150" role="img" aria-label="A request splits into DNS, TCP, TLS, TTFB and transfer. Only the TTFB segment shrinks on a cache hit.">
+    <text x="0" y="12" class="svg-title">CACHE MISS — THE EDGE ASKED OREGON</text>
+    <rect x="0" y="22" width="24" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <rect x="24" y="22" width="32" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <rect x="56" y="22" width="42" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <rect x="98" y="22" width="322" height="24" fill="var(--origin-wash)" stroke="var(--origin)" stroke-width="1.5"/>
+    <rect x="420" y="22" width="14" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <text x="255" y="38" class="svg-label-strong" text-anchor="middle" fill="var(--origin)">TTFB</text>
+    <text x="0" y="60" class="svg-label">dns</text><text x="28" y="60" class="svg-label">tcp</text>
+    <text x="60" y="60" class="svg-label">tls</text><text x="416" y="60" class="svg-label">transfer</text>
+
+    <text x="0" y="96" class="svg-title">CACHE HIT — THE EDGE ANSWERED ITSELF</text>
+    <rect x="0" y="106" width="24" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <rect x="24" y="106" width="32" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <rect x="56" y="106" width="42" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <rect x="98" y="106" width="40" height="24" fill="var(--edge-wash)" stroke="var(--edge)" stroke-width="1.5"/>
+    <rect x="138" y="106" width="14" height="24" fill="var(--ground-3)" stroke="var(--ink-3)"/>
+    <line x1="152" y1="118" x2="430" y2="118" stroke="var(--edge)" stroke-dasharray="3 3" opacity=".5"/>
+    <text x="300" y="113" class="svg-label" fill="var(--edge)">this no longer happens</text>
+  </svg>
+  <figcaption>DNS, TCP and TLS cost about the same either way. The whole saving is the fourth segment.</figcaption>
+</figure>
+
+<dl class="def">
+  <dt>TTFB — time to first byte</dt>
+  <dd>The gap between finishing your request and the first byte of the answer arriving. It bundles three things: your request travelling out, the server thinking, and the first byte travelling back.</dd>
+</dl>
+
+<p>That "server thinking" part is genuinely inside it. Asking the lab's origin to sleep for a fixed time moves TTFB by exactly that much:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Origin told to sleep</th><th>Measured TTFB</th><th>Reading</th></tr></thead>
+  <tbody>
+    <tr><td class="n">0 ms</td><td class="n">0.69 s</td><td>pure travel time</td></tr>
+    <tr><td class="n">1000 ms</td><td class="n">1.38 s</td><td>travel + 1s of work</td></tr>
+    <tr><td class="n">3000 ms</td><td class="n">3.31 s</td><td>travel + 3s of work</td></tr>
+  </tbody>
+</table></div>
+
+<p><strong>TTFB = round trip + server work</strong>, and a cache hit deletes both at once. That is why it is the only segment worth watching when you are judging whether a CDN is helping.</p>
+
+<div class="note">
+  <span class="tag">Worth knowing early</span>
+  <p>Speed alone can't prove a cache hit — a fast response might just be a warm connection. The lab's origin counts every request that reaches it, so a counter that stops moving is proof the edge answered. Throughout these posts, that counter is the evidence; the cache status header is only a claim.</p>
+</div>
+
+<div class="postnav">
+  <a href="/">← All posts</a>
+  <a href="/cdn/02.html">Next: turning a CDN on caches nothing →</a>
+</div>
+
+</div>
+<script src="/assets/lab.js"></script>
+</body>
+</html>
