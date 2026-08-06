@@ -1,0 +1,22 @@
+# Static-asset Worker serving the blog.
+#
+# Cloudflare now folds Pages into Workers, so a static site is deployed as a
+# Worker with an assets directory rather than as a Pages project. There is no
+# `main` script: requests are answered straight from ./public without invoking
+# any code, so page views do not consume the Workers request quota.
+#
+# The site lives in public/ rather than beside this file so that wrangler.toml
+# itself is never served as part of the site.
+name = "blog-drkreddy"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./public"
+# Clean URLs, and a real 404 for anything missing rather than silently serving
+# index.html — a soft 404 hides broken links from both readers and crawlers.
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
+
+[[routes]]
+pattern = "blog.drkreddy.com/*"
+zone_name = "drkreddy.com"
