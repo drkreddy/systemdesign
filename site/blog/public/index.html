@@ -14,37 +14,27 @@
 <div class="shell">
 <input type="checkbox" id="navtoggle" class="navtoggle">
 <label for="navtoggle" class="navbtn">Menu</label>
+<!-- nav:start --> generated from labs.json, do not edit by hand -->
 <nav class="sidebar">
   <a class="brand" href="/">drkreddy <span>/ labs</span></a>
   <div class="navgroup">
-    <p class="navlabel">CDN</p>
-    <a class="post" href="/cdn/01"><span class="n">01</span><span>Distance is the problem</span></a>
-    <a class="post" href="/cdn/02"><span class="n">02</span><span>Turning it on caches nothing</span></a>
-    <a class="post" href="/cdn/03"><span class="n">03</span><span>Every city caches separately</span></a>
-    <a class="post" href="/cdn/04"><span class="n">04</span><span>How cache keys shatter</span></a>
-    <a class="post" href="/cdn/05"><span class="n">05</span><span>Fresh, stale, serving old</span></a>
-    <a class="post" href="/cdn/06"><span class="n">06</span><span>The thundering herd</span></a>
+    <a class="lab" href="/cdn/01"><span>CDN</span><span class="count">6</span></a>
   </div>
   <div class="navgroup">
-    <p class="navlabel">Rate limiting</p>
-    <a class="post" href="/rate-limit/01"><span class="n">01</span><span>Counting is harder than it looks</span></a>
-    <a class="post" href="/rate-limit/02"><span class="n">02</span><span>The boundary burst</span></a>
-    <a class="post" href="/rate-limit/03"><span class="n">03</span><span>Token bucket</span></a>
-    <a class="post" href="/rate-limit/04"><span class="n">04</span><span>Limit × server count</span></a>
-    <a class="post" href="/rate-limit/05"><span class="n">05</span><span>Saying no properly</span></a>
+    <a class="lab" href="/rate-limit/01"><span>Rate limiting</span><span class="count">5</span></a>
   </div>
 </nav>
+<!-- nav:end -->
 <main id="main">
 
 <p class="eyebrow">Labs you can run from this page</p>
 <h1>Systems, measured rather than described</h1>
 <p class="standfirst">Short posts about infrastructure, each one built by measuring a real setup rather than repeating what the documentation claims. Every experiment runs from your browser.</p>
 
+<!-- labs:start --> generated from labs.json, do not edit by hand -->
 <h2>CDN <span style="font-weight:400;color:var(--ink-3);font-size:.7em">6 posts</span></h2>
-<p>Most explanations stop at "it keeps copies closer to users". That's true and it's not enough to work with. It doesn't tell you why turning a CDN on often caches <em>nothing</em>, why a cache can serve the wrong visitor's content while reporting perfect health, or why clearing your cache can make your site four times slower worldwide.</p>
-
+<p>Most explanations stop at "it keeps copies closer to users". That's true and it's not enough to work with. It doesn't tell you why turning a CDN on often caches nothing, why a cache can serve the wrong visitor's content while reporting perfect health, or why clearing your cache can make your site four times slower worldwide.</p>
 <p>Each post has a <strong>Run it live</strong> button. Recorded numbers appear instantly; pressing the button fires real requests against a server in Oregon behind Cloudflare.</p>
-
 <div class="cards">
   <a class="card" href="/cdn/01">
     <span class="n">01</span>
@@ -77,10 +67,9 @@
     <p>What happens when every cache empties at once — and which defence protects whom.</p>
   </a>
 </div>
-
 <h2>Rate limiting <span style="font-weight:400;color:var(--ink-3);font-size:.7em">5 posts</span></h2>
-<p>Every limiter answers one question — has this client had too many? — and the obvious way to answer it lets a client take twice its limit without breaking a rule. These posts simulate the algorithms side by side, in your browser, with no network involved.</p>
-
+<p>Every limiter answers one question — has this client had too many? — and the obvious way to answer it lets a client take twice its limit without breaking a rule.</p>
+<p>The algorithms are deterministic arithmetic, so these posts simulate them side by side in your browser with no network involved. Only the last one talks to a server, because being genuinely refused cannot be simulated.</p>
 <div class="cards">
   <a class="card" href="/rate-limit/01">
     <span class="n">01</span>
@@ -108,8 +97,7 @@
     <p>A bare 429 causes the traffic it was meant to stop. Trip a real limiter yourself.</p>
   </a>
 </div>
-
-<h2>How the live experiments work</h2>
+<!-- labs:end --><h2>How the live experiments work</h2>
 <p>Requests go to <code>play.drkreddy.com</code>, a deliberately small public surface in front of the real lab. Every parameter is capped, only a fixed list of experiments exists, and your requests are namespaced to you — so two readers running the same experiment see their own independent results rather than confusing each other.</p>
 
 <p>If the live path is unavailable, busy, or rate limited, the widgets fall back to recorded data and say so. You should never see a broken box on a page whose job is explaining something.</p>

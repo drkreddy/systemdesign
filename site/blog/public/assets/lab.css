@@ -164,6 +164,32 @@ main > dl.def, main > .note, main > pre {
 }
 .sidebar a.post[aria-current="page"] .n { color: var(--edge); }
 
+/* A lab the reader is not currently in: one row, not its whole post list.
+   Styled as a destination rather than a heading, so it does not read as a
+   dead label — the count is the cue that there is something behind it. */
+.sidebar a.lab {
+  display: flex; justify-content: space-between; align-items: baseline; gap: .6rem;
+  padding: .34rem 0; color: var(--ink-2); text-decoration: none;
+  font-family: var(--mono); font-size: .74rem; letter-spacing: .13em;
+  text-transform: uppercase; font-weight: 500;
+}
+.sidebar a.lab:hover { color: var(--edge); }
+.sidebar a.lab .count {
+  font-size: .7rem; letter-spacing: 0; color: var(--ink-3);
+  background: var(--ground-3); border-radius: 10px; padding: .05em .5em;
+  flex: none;
+}
+.sidebar a.lab:hover .count { color: var(--edge); }
+
+/* Rendered by build-nav.js only once there are more than six labs. */
+.navfilter {
+  width: 100%; margin-bottom: 1.4rem; padding: .4em .6em;
+  font-family: var(--mono); font-size: .8rem;
+  background: var(--ground-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 4px;
+}
+.navgroup[hidden] { display: none; }
+
 /* CSS-only mobile disclosure — no script, so it cannot fail to load. */
 .navtoggle { position: absolute; opacity: 0; pointer-events: none; }
 .navbtn { display: none; }

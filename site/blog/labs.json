@@ -1,0 +1,54 @@
+{
+  "_comment": "The only place a post is registered. scripts/build-nav.js regenerates every sidebar and the index from this file, so adding a post is one edit here plus the page itself — not an edit to every page on the site.",
+  "labs": [
+    {
+      "slug": "cdn",
+      "title": "CDN",
+      "blurb": "Most explanations stop at \"it keeps copies closer to users\". That's true and it's not enough to work with. It doesn't tell you why turning a CDN on often caches nothing, why a cache can serve the wrong visitor's content while reporting perfect health, or why clearing your cache can make your site four times slower worldwide.",
+      "note": "Each post has a <strong>Run it live</strong> button. Recorded numbers appear instantly; pressing the button fires real requests against a server in Oregon behind Cloudflare.",
+      "posts": [
+        { "n": "01", "nav": "Distance is the problem",
+          "title": "Why distance is the whole problem",
+          "blurb": "A round trip to Oregon costs ~200ms no matter how fast your code is. What a cache hit actually removes." },
+        { "n": "02", "nav": "Turning it on caches nothing",
+          "title": "Turning a CDN on caches nothing",
+          "blurb": "A textbook-perfect Cache-Control header, and still zero caching. Two decisions that look like one." },
+        { "n": "03", "nav": "Every city caches separately",
+          "title": "Every city caches separately",
+          "blurb": "Warming the cache in Singapore does nothing for Tokyo. Measured across ten cities." },
+        { "n": "04", "nav": "How cache keys shatter",
+          "title": "How cache keys shatter",
+          "blurb": "Five people share one link on different platforms and your cache becomes five objects." },
+        { "n": "05", "nav": "Fresh, stale, serving old",
+          "title": "Fresh, stale, and serving old data on purpose",
+          "blurb": "The trick that answers in 55ms from a server taking two seconds." },
+        { "n": "06", "nav": "The thundering herd",
+          "title": "The thundering herd",
+          "blurb": "What happens when every cache empties at once — and which defence protects whom." }
+      ]
+    },
+    {
+      "slug": "rate-limit",
+      "title": "Rate limiting",
+      "blurb": "Every limiter answers one question — has this client had too many? — and the obvious way to answer it lets a client take twice its limit without breaking a rule.",
+      "note": "The algorithms are deterministic arithmetic, so these posts simulate them side by side in your browser with no network involved. Only the last one talks to a server, because being genuinely refused cannot be simulated.",
+      "posts": [
+        { "n": "01", "nav": "Counting is harder than it looks",
+          "title": "Counting requests is harder than it looks",
+          "blurb": "Four different jobs a limiter does, and why the obvious implementation has a hole." },
+        { "n": "02", "nav": "The boundary burst",
+          "title": "The boundary burst",
+          "blurb": "Twice the limit in two seconds, entirely within the rules. What each fix costs." },
+        { "n": "03", "nav": "Token bucket",
+          "title": "Token bucket: allowing bursts on purpose",
+          "blurb": "Real clients are bursty. Separating sustained rate from burst tolerance." },
+        { "n": "04", "nav": "Limit × server count",
+          "title": "Your limit is multiplied by your server count",
+          "blurb": "Eight servers turn a limit of 10 into a limit of 80. What exactness costs." },
+        { "n": "05", "nav": "Saying no properly",
+          "title": "Saying no properly",
+          "blurb": "A bare 429 causes the traffic it was meant to stop. Trip a real limiter yourself." }
+      ]
+    }
+  ]
+}
