@@ -27,9 +27,10 @@
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  --sidebar: 17rem;
-  --col:     62rem;   /* figures, tables, widgets */
-  --prose:   45rem;   /* running text */
+  --sidebar: 14rem;
+  --toc:     11rem;
+  --col:     46rem;   /* figures, tables, widgets span this */
+  --prose:   38rem;   /* running text stays near 70 characters */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -71,13 +72,47 @@ body {
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
-  gap: 0 3.5rem;
-  max-width: calc(var(--sidebar) + var(--col) + 7rem);
+  gap: 0 3rem;
+  max-width: calc(var(--sidebar) + var(--col) + 3rem + 4rem);
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 2rem;
 }
 
-main { min-width: 0; padding: 3.5rem 0 7rem; max-width: var(--col); }
+/* The fix. Previously main filled its grid cell and began flush against the
+   rail; it now has its own width and is centred WITHIN that cell, so the
+   article has equal space on both sides rather than a border on one. */
+main {
+  min-width: 0;
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: 4rem 0 7rem;
+}
+
+/* On this page. Only appears when there is genuinely room for it, so it never
+   squeezes the column it is meant to accompany. */
+.toc { display: none; }
+@media (min-width: 1400px) {
+  .shell {
+    grid-template-columns: var(--sidebar) minmax(0, 1fr) var(--toc);
+    max-width: calc(var(--sidebar) + var(--col) + var(--toc) + 5.5rem + 4rem);
+    gap: 0 3rem;
+  }
+  .toc {
+    display: block; position: sticky; top: 4rem; align-self: start;
+    padding-top: 4rem; max-height: calc(100vh - 6rem); overflow-y: auto;
+  }
+}
+.toc p {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 .7rem; font-weight: 500;
+}
+.toc a {
+  display: block; padding: .28rem 0 .28rem .7rem;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-3); text-decoration: none; font-size: .82rem; line-height: 1.4;
+}
+.toc a:hover { color: var(--edge); border-left-color: var(--edge); }
+.toc a.here { color: var(--ink); border-left-color: var(--edge); }
 
 /* Running text is narrower than the column it sits in; everything visual
    uses the full width. */
@@ -94,9 +129,8 @@ main > dl.def, main > .note, main > pre {
 .sidebar {
   position: sticky; top: 0; align-self: start;
   height: 100vh; overflow-y: auto;
-  padding: 2.2rem 0 3rem;
+  padding: 4rem 1.5rem 3rem 0;
   border-right: 1px solid var(--rule);
-  margin-right: -1.75rem; padding-right: 1.75rem;
 }
 .brand {
   display: block; font-family: var(--mono); font-weight: 600;
@@ -140,7 +174,8 @@ main > dl.def, main > .note, main > pre {
 .skip:focus { left: 1rem; top: 1rem; }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 1.25rem; }
+  main { padding-top: 1.5rem; }
   .sidebar {
     position: static; height: auto; overflow: visible;
     border-right: none; border-bottom: 1px solid var(--rule);
