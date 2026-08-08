@@ -41,3 +41,23 @@ if (rail && headings.length > 1) {
 
   headings.forEach((h) => io.observe(h));
 }
+
+/* Sidebar filter.
+ *
+ * Lives here rather than in its own file because every page already loads this
+ * one — a separate script would be an extra request for eight lines, and it
+ * shipped once already with nothing loading it at all.
+ *
+ * build-nav.js only emits the input past six labs, so below that this finds
+ * nothing and does nothing. Filtering works on text already in the page: no
+ * index, no fetch. Groups are hidden rather than removed, so clearing the box
+ * restores everything.
+ */
+const navFilter = document.querySelector('.navfilter');
+if (navFilter) {
+  const groups = [...document.querySelectorAll('.sidebar .navgroup')];
+  navFilter.addEventListener('input', () => {
+    const q = navFilter.value.trim().toLowerCase();
+    for (const g of groups) g.hidden = q !== '' && !g.textContent.toLowerCase().includes(q);
+  });
+}
