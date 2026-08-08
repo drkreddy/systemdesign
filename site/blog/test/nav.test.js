@@ -4,7 +4,10 @@
  * revisited when they landed. Nothing caught it — every link on the page
  * resolved, so a link crawler passed. The bug was a link that was ABSENT.
  *
- * This asserts the sequence is walkable in both directions.
+ * Scoped to the in-content .postnav block ON PURPOSE. The sidebar lists every
+ * post on every page, so checking the whole document would pass trivially
+ * whether or not sequential navigation existed — the same vacuous-pass problem
+ * this file was written to catch, reintroduced by a layout change.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,13 +23,18 @@ for (const lab of ['cdn', 'rate-limit']) {
   const posts = readdirSync(join(ROOT, lab)).filter((f) => /^\d+\.html$/.test(f)).sort();
   console.log(`\n— ${lab}: ${posts.length} posts —`);
   posts.forEach((file, i) => {
-    const html = readFileSync(join(ROOT, lab, file), 'utf8');
+    const full = readFileSync(join(ROOT, lab, file), 'utf8');
+    const m = full.match(/<div class="postnav">([\s\S]*?)<\/div>/);
+    if (!m) { check(`${file} has a postnav block`, false); return; }
+    const html = m[1];
     const n = file.replace('.html', '');
     const next = posts[i + 1]?.replace('.html', '');
     const prev = posts[i - 1]?.replace('.html', '');
     if (next) check(`${n} links forward to ${next}`, html.includes(`href="/${lab}/${next}"`));
     if (prev) check(`${n} links back to ${prev}`,     html.includes(`href="/${lab}/${prev}"`));
-    check(`${n} links to the index`, html.includes('href="/"'));
+    // The sidebar always links home, so only the first and last post of a lab
+    // need an index link in their sequential navigation.
+    if (!next || !prev) check(`${n} offers a way back to the index`, html.includes('href="/"'));
   });
 }
 
