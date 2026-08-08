@@ -25,9 +25,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BLOG = join(HERE, '..');
 const PUBLIC = join(BLOG, 'public');
 
-const NAV_START = '<!-- nav:start --> generated from labs.json, do not edit by hand -->';
+// A single well-formed comment. The first version closed after 'nav:start',
+// leaving the rest as visible text — which also became a grid item and shoved
+// every column one place to the right.
+const NAV_START = '<!-- nav:start | generated from labs.json, do not edit by hand -->';
 const NAV_END = '<!-- nav:end -->';
-const IDX_START = '<!-- labs:start --> generated from labs.json, do not edit by hand -->';
+const IDX_START = '<!-- labs:start | generated from labs.json, do not edit by hand -->';
 const IDX_END = '<!-- labs:end -->';
 
 const manifest = JSON.parse(readFileSync(join(BLOG, 'labs.json'), 'utf8'));
