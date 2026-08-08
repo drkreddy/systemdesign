@@ -29,8 +29,8 @@
 
   --sidebar: 14rem;
   --toc:     11rem;
-  --col:     46rem;   /* figures, tables, widgets span this */
-  --prose:   38rem;   /* running text stays near 70 characters */
+  --col:     58rem;   /* figures, tables, widgets span this */
+  --prose:   44rem;   /* running text, centred within the column */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -114,15 +114,23 @@ main {
 .toc a:hover { color: var(--edge); border-left-color: var(--edge); }
 .toc a.here { color: var(--ink); border-left-color: var(--edge); }
 
-/* Running text is narrower than the column it sits in; everything visual
-   uses the full width. */
+/* Running text is narrower than the column it sits in, and CENTRED within it.
+   Left-aligning it left every paragraph stopping short of the figures beside
+   it, with dead space down one side — which read as a broken column rather
+   than a deliberate measure. Auto margins centre the block; the text inside
+   stays left-aligned. */
 main > p,
 main > h1, main > h2, main > h3,
 main > ul, main > ol,
 main > .standfirst, main > .eyebrow,
-main > dl.def, main > .note, main > pre {
+main > dl.def, main > .note, main > pre,
+main > .legend, main > .postnav {
   max-width: var(--prose);
+  margin-left: auto;
+  margin-right: auto;
 }
+/* figcaption sits inside a figure, so it is centred relative to that instead. */
+figure figcaption { margin-left: auto; margin-right: auto; }
 
 /* -------------------------------------------------------------- sidebar */
 
